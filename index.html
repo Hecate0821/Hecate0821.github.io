@@ -545,12 +545,65 @@
 <script>
 (function(){
   // ---- token-flow background ------------------------------------------
-  // every row is a horizontal stream of BPE-ish LLM vocabulary tokens
-  // (attention, softmax, rope, kv-cache, …). the rows shift rightward
-  // at slightly different speeds, so the whole viewport looks like
-  // tokens continuously flowing in from the left edge.
+  // the viewport is mostly empty. a small number of "tracks" occasionally
+  // spawn an LLM / RL formula that drifts slowly from left to right.
+  // when a track's formula exits the right edge it cools down, waits,
+  // then picks another formula from the pool.
   var el = document.querySelector('pre.token-flow');
   if (!el) return;
+
+  // canonical snippet pool — attention/MLP building blocks, RL post-training
+  // objectives, and bits of LLM-serving infra (kv-cache, paged attention,
+  // parallelism, speculative decoding, …). intentionally terse so each
+  // fits a single flowing line.
+  var FORMULAS = [
+    // --- attention / architecture ---
+    'Attention(Q,K,V) = softmax(Q·Kᵀ / √d_k) · V',
+    'MultiHead(Q,K,V) = Concat(head_1, …, head_h) · W_O',
+    'for h in heads:  q_h = x·W_Q^h;  k_h = x·W_K^h;  v_h = x·W_V^h;  o_h = softmax(q_h·k_hᵀ/√d)·v_h',
+    'FFN(x) = W_2 · gelu(W_1 · x + b_1) + b_2',
+    'SwiGLU(x) = (W_1 x ⊙ σ(W_gate x)) · W_2',
+    'RoPE(x, m) = R_Θ,m · x;    q_rot = q·cos_m + rotate(q)·sin_m',
+    'LN(x) = (x − μ) / √(σ² + ε) · γ + β',
+    'RMSNorm(x) = x / √(mean(x²) + ε) · γ',
+    'y = x + Attn(LN(x));   y = y + MLP(LN(y))',
+    // --- kv-cache / serving infra ---
+    'K_cache[t] = W_K · x_t;   V_cache[t] = W_V · x_t;   append(kv_cache, K_cache[t], V_cache[t])',
+    'paged_attention(q, K_pages, V_pages, block_table, seq_lens)',
+    'flash_attn(Q, K, V, softmax_scale=1/√d, causal=True)',
+    'MQA:   K,V shared across h heads   →   kv_cache size ÷ h',
+    'GQA(g):  K_g, V_g per group;   heads within a group share kv',
+    'ring_attention(Q, K_shards, V_shards)     // context parallel across seq',
+    'chunked_prefill(x, chunk=512):  for c in chunks:  fwd(c, kv_cache)',
+    'speculative_decode:  draft = π_draft(x, k=4);  accept = verify(π_main, draft)',
+    'continuous_batching:  schedule(running ∪ waiting) → step → detok → evict(finished)',
+    'prefix_cache.lookup(prompt)  →  reuse KV for shared prefix',
+    // --- parallelism ---
+    'TP:  Linear = col_parallel · row_parallel;   all_reduce(y) across tp_group',
+    'FSDP_unit(layer):  all_gather(params) → fwd → reshard → bwd → reduce_scatter(grads)',
+    'ZeRO-3:  shard(params + grads + optim_states) across dp_rank',
+    'PP(1F1B):  micro_batch i flows stages 0..S-1;   steady state = 1 fwd + 1 bwd per step',
+    'grad_ckpt(layer):  save x;   recompute fwd during bwd to save activations',
+    // --- training / post-training losses ---
+    'L_SFT(θ) = − Σ_t log π_θ(y_t | y_<t, x)',
+    'H(p) = − Σ_x p(x) log p(x)',
+    'KL(p ‖ q) = Σ_x p(x) log( p(x) / q(x) )',
+    // --- RL / policy-grad objectives ---
+    'ρ_t(θ) = π_θ(a_t|s_t) / π_old(a_t|s_t)',
+    'J_PPO(θ) = 𝔼_t[ min( ρ_t · Â_t,  clip(ρ_t, 1−ε, 1+ε) · Â_t ) ]',
+    'J_GRPO(θ) = (1/G) Σ_i 𝔼[ min(ρ_i · Â_i, clip(ρ_i, 1−ε, 1+ε) · Â_i) ] − β · KL(π_θ ‖ π_ref)',
+    'Â_i = (r_i − mean(r_{1..G})) / std(r_{1..G})',
+    'J_CISPO(θ) = 𝔼[ stop_grad( clip(ρ, 1−ε_low, 1+ε_high) ) · ρ · Â ]',
+    'ρ̂ = min(ρ, c̄)       // truncated importance sampling',
+    'ρ̂ = clip(ρ, 1−ε, 1+ε)   // clipped IS ratio',
+    'L_DPO = − log σ( β · log(π_θ/π_ref)(y_w|x) − β · log(π_θ/π_ref)(y_l|x) )',
+    'L_IPO = ( log(π_θ/π_ref)(y_w|x) − log(π_θ/π_ref)(y_l|x) − 1/(2β) )²',
+    'L_KTO = w_+ · (1 − σ(β·z_+)) + w_− · (1 − σ(−β·z_−))',
+    '∇_θ J(θ) = 𝔼[ ∇_θ log π_θ(a|s) · Â(s,a) ]',
+    'Â_t^{GAE(γ,λ)} = Σ_l (γλ)^l · δ_{t+l},    δ_t = r_t + γV(s_{t+1}) − V(s_t)',
+    'V_π(s) = 𝔼_π[ Σ_t γ^t r_t | s_0 = s ]',
+    'Q_π(s,a) = 𝔼_π[ Σ_t γ^t r_t | s_0=s, a_0=a ]'
+  ];
 
   function measureCell() {
     var probe = document.createElement('span');
@@ -567,81 +620,102 @@
 
   var CELL = measureCell();
   var COLS = 0, ROWS = 0;
-
-  var VOCAB = [
-    '▁attention','▁softmax','▁query','▁key','▁value','▁head','▁multi','▁scaled',
-    '▁dot','▁product','▁matmul','▁layer','▁norm','▁residual','▁embedding',
-    '▁pos','▁rope','▁rotary','▁kv','▁cache','▁prefill','▁decode','▁flash',
-    '▁fused','▁kernel','▁transformer','▁block','▁mlp','▁ffn','▁gelu','▁silu',
-    '▁swiglu','▁dropout','▁token','▁tokens','▁vocab','▁logits','▁loss',
-    '▁reward','▁policy','▁grad','▁backward','▁forward','▁optimizer','▁adam',
-    '▁adamw','▁weight','▁decay','▁step','▁epoch','▁batch','▁seq_len',
-    '▁rlhf','▁ppo','▁grpo','▁dpo','▁ref','▁baseline','▁advantage','▁return',
-    '▁sample','▁temperature','▁top_k','▁top_p','▁beam','▁greedy','▁context',
-    '▁window','▁mask','▁causal','▁bos','▁eos','▁pad','▁fp16','▁bf16','▁int8',
-    '▁int4','▁quant','▁lora','▁adapter','▁distill','▁student','▁teacher',
-    '▁actor','▁critic','▁env','▁agent','▁rollout','▁episode','▁replay',
-    '<|bos|>','<|eos|>','</s>','<s>','<pad>','<unk>'
-  ];
-
-  // deterministic per-row PRNG so streams regenerate identically on resize
-  var rng = 0;
-  function rand() { rng = (rng * 1664525 + 1013904223) >>> 0; return rng; }
-
-  var streams = [];
-  var speeds = [];
-
-  function rebuildStreams() {
-    streams = [];
-    speeds = [];
-    var targetLen = Math.max(COLS * 4, 600);
-    for (var r = 0; r < ROWS; r++) {
-      rng = (0x9e3779b1 ^ (r * 2654435761)) >>> 0;
-      var s = '';
-      while (s.length < targetLen) {
-        s += VOCAB[rand() % VOCAB.length] + ' ';
-      }
-      streams.push(s);
-      // speed: 0.14 .. 0.48 chars/frame, varied per row for parallax
-      speeds.push(0.14 + ((r * 37) % 17) * 0.02);
-    }
-  }
-
   function resize() {
     COLS = Math.ceil(window.innerWidth  / CELL.w) + 1;
     ROWS = Math.ceil(window.innerHeight / CELL.h) + 1;
-    rebuildStreams();
-  }
-  resize();
-  window.addEventListener('resize', function(){ CELL = measureCell(); resize(); });
-
-  // characters shift rightward each frame — visually, tokens flow in
-  // from the left edge and travel toward the right.
-  function rowAt(r, f) {
-    var s = streams[r];
-    var len = s.length;
-    var off = Math.floor(f * speeds[r]) % len;
-    var start = (len - off) % len;
-    if (start + COLS <= len) return s.substring(start, start + COLS);
-    return s.substring(start) + s.substring(0, COLS - (len - start));
+    // reseat every active track so none are orphaned off-viewport
+    for (var i = 0; i < tracks.length; i++) retire(tracks[i]);
   }
 
-  var f = 0;
+  function rnd() { return Math.random(); }
+  function pick(arr) { return arr[(rnd() * arr.length) | 0]; }
+
+  // up to 5 formulas in flight at once, across all rows
+  var N_TRACKS = 5;
+  var tracks = [];
+  for (var i = 0; i < N_TRACKS; i++) {
+    tracks.push({ active: false, cooldown: (i * 60 + (rnd()*80)|0), row: 0, text: '', col: 0, speed: 0.06 });
+  }
+
+  function activate(t) {
+    t.active = true;
+    t.text = pick(FORMULAS);
+    t.row = (rnd() * Math.max(1, ROWS)) | 0;
+    t.col = -t.text.length;          // start fully off the left edge
+    t.speed = 0.04 + rnd() * 0.06;   // 0.04 .. 0.10 chars/frame, slow + readable
+  }
+  function retire(t) {
+    t.active = false;
+    t.cooldown = 180 + ((rnd() * 360) | 0);  // 3 – 9 s at 60fps before next formula
+  }
+
+  // each frame: advance active tracks, tick cooldowns, then render
   function frame() {
-    f++;
+    // step tracks
+    for (var i = 0; i < tracks.length; i++) {
+      var t = tracks[i];
+      if (!t.active) {
+        if (--t.cooldown <= 0) activate(t);
+      } else {
+        t.col += t.speed;
+        if (t.col > COLS + 2) retire(t);
+      }
+    }
+
+    // build viewport as array of row buffers (all spaces)
+    var rows = new Array(ROWS);
+    for (var r = 0; r < ROWS; r++) rows[r] = null;
+
+    // paint active formulas
+    for (var i = 0; i < tracks.length; i++) {
+      var t = tracks[i];
+      if (!t.active) continue;
+      if (t.row < 0 || t.row >= ROWS) continue;
+      var buf = rows[t.row];
+      if (!buf) { buf = new Array(COLS); for (var c = 0; c < COLS; c++) buf[c] = ' '; rows[t.row] = buf; }
+      var startCol = Math.floor(t.col);
+      for (var k = 0; k < t.text.length; k++) {
+        var c = startCol + k;
+        if (c >= 0 && c < COLS) buf[c] = t.text.charAt(k);
+      }
+    }
+
+    // stringify
     var out = '';
-    for (var r = 0; r < ROWS; r++) out += rowAt(r, f) + '\n';
+    var blank = null;
+    for (var r = 0; r < ROWS; r++) {
+      if (rows[r]) {
+        out += rows[r].join('') + '\n';
+      } else {
+        if (!blank) { blank = ' '.repeat(COLS); }
+        out += blank + '\n';
+      }
+    }
     el.textContent = out;
     requestAnimationFrame(frame);
   }
 
+  resize();
+  window.addEventListener('resize', function(){ CELL = measureCell(); resize(); });
+
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     requestAnimationFrame(frame);
   } else {
-    // static snapshot
-    var snap = '';
-    for (var r = 0; r < ROWS; r++) snap += rowAt(r, 0) + '\n';
-    el.textContent = snap;
+    // static snapshot: one sample formula centered vertically
+    var blank = ' '.repeat(COLS);
+    var out = '';
+    var midRow = Math.floor(ROWS / 2);
+    var sample = FORMULAS[0];
+    var leftCol = Math.max(0, Math.floor((COLS - sample.length) / 2));
+    for (var r = 0; r < ROWS; r++) {
+      if (r === midRow) {
+        var line = blank.substring(0, leftCol) + sample + blank.substring(leftCol + sample.length);
+        out += line.substring(0, COLS) + '\n';
+      } else {
+        out += blank + '\n';
+      }
+    }
+    el.textContent = out;
   }
 })();
 </script>
