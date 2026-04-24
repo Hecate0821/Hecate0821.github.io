@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1280" />
+<title>Chengxi Li — Résumé</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<script>
+  (function(){
+    try {
+      var saved = localStorage.getItem('theme');
+      var prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+      var theme = saved || (prefersLight ? 'light' : 'dark');
+      document.documentElement.setAttribute('data-theme', theme);
+    } catch (e) {
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  })();
+</script>
+<style>
+  :root, [data-theme="dark"] {
+    --bg: #0a0d12;
+    --ink: #e8ecf1;
+    --ink-dim: #8a94a4;
+    --ink-faint: #4c5565;
+    --rule: #1a2030;
+    --accent: #6aa0ff;
+    --accent-soft: #2b3a5c;
+    --photo-bg: #0e1219;
+    --photo-vignette: rgba(10,13,18,0.65);
+    --photo-filter: grayscale(0.35) brightness(0.82) contrast(1.05);
+    --photo-shadow: 0 12px 40px -20px rgba(0,0,0,0.85);
+  }
+  [data-theme="light"] {
+    --bg: #ece4d3;
+    --ink: #1a1b1e;
+    --ink-dim: #5c5a54;
+    --ink-faint: #a39d8c;
+    --rule: #d4ccba;
+    --accent: #2a62d0;
+    --accent-soft: #c0d2ed;
+    --photo-bg: #ddd4be;
+    --photo-vignette: transparent;
+    --photo-filter: none;
+    --photo-shadow: 0 10px 32px -18px rgba(60,50,30,0.30);
+  }
+  /* ---------- unified, viewport-responsive type scale ----------
+     linear ramp: floor at 1280px-wide viewport, target (current 4K)
+     at 2560px+. one scale governs every font-size in the document. */
+  :root {
+    --fs-2xs:     clamp(8px,  calc(6px  + 0.15625vw),  10px);
+    --fs-xs:      clamp(9px,  calc(7px  + 0.15625vw),  11px);
+    --fs-sm:      clamp(10px, calc(8px  + 0.15625vw),  12px);
+    --fs-md:      clamp(11px, calc(9px  + 0.15625vw),  13px);
+    --fs-lg:      clamp(12px, calc(10px + 0.15625vw),  14px);
+    --fs-xl:      clamp(14px, calc(10px + 0.3125vw),   18px);
+    --fs-display: clamp(28px, calc(16px + 0.9375vw),   40px);
+  }
+  /* soft cross-fade when the theme flips; easier on the eyes than a hard swap */
+  *, *::before, *::after {
+    transition: background-color 2.2s cubic-bezier(0.33, 0, 0.2, 1),
+                color            2.2s cubic-bezier(0.33, 0, 0.2, 1),
+                border-color     2.2s cubic-bezier(0.33, 0, 0.2, 1),
+                box-shadow       2.2s cubic-bezier(0.33, 0, 0.2, 1),
+                filter           2.2s cubic-bezier(0.33, 0, 0.2, 1);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink); }
+  body {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: var(--fs-md);
+    line-height: 1.55;
+    letter-spacing: 0.005em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+  a { color: inherit; text-decoration: none; }
+  a:hover { color: var(--accent); }
+
+  /* ---------- page frame ---------- */
+  .page {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 56px 72px 96px;
+  }
+
+  .corner {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border: 1px solid var(--ink-faint);
+    pointer-events: none;
+  }
+  .corner.tl { top: 28px; left: 28px; border-right: none; border-bottom: none; }
+  .corner.tr { top: 28px; right: 28px; border-left: none; border-bottom: none; }
+  .corner.bl { bottom: 28px; left: 28px; border-right: none; border-top: none; }
+  .corner.br { bottom: 28px; right: 28px; border-left: none; border-top: none; }
+
+  /* ---------- nav ---------- */
+  nav.top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: var(--fs-sm);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    padding-bottom: 72px;
+  }
+  nav.top .brand {
+    color: var(--ink);
+    letter-spacing: 0.22em;
+    font-weight: 500;
+  }
+  nav.top ul { list-style: none; display: flex; gap: 28px; }
+  nav.top a:hover { color: var(--ink); }
+  nav.top .nav-right { display: flex; align-items: center; gap: 24px; }
+  .theme-toggle {
+    background: transparent;
+    border: 1px solid var(--rule);
+    color: var(--ink-dim);
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: var(--fs-lg);
+    letter-spacing: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 2px;
+    transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+    padding: 0;
+  }
+  .theme-toggle:hover { color: var(--ink); border-color: var(--ink-faint); }
+
+  /* ---------- header ---------- */
+  header.head {
+    padding: 56px 0;
+    border-bottom: 1px solid var(--rule);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 48px;
+    align-items: start;
+  }
+  header.head .head-text { min-width: 0; }
+  header.head .head-photo-frame {
+    position: relative;
+    width: 160px;
+    padding: 5px;
+    background: var(--photo-bg);
+    border: 1px solid var(--ink-faint);
+    border-radius: 4px;
+    box-shadow: var(--photo-shadow);
+  }
+  header.head .head-photo-frame::after {
+    content: "";
+    position: absolute;
+    inset: 5px;
+    border-radius: 2px;
+    box-shadow: inset 0 0 26px 2px var(--photo-vignette);
+    pointer-events: none;
+  }
+  header.head .head-photo {
+    display: block;
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    object-position: center 20%;
+    border-radius: 2px;
+    filter: var(--photo-filter);
+  }
+  header.head .name {
+    font-family: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
+    font-weight: 500;
+    font-size: var(--fs-display);
+    line-height: 1.05;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin-bottom: 18px;
+  }
+  header.head .title {
+    font-family: "Space Grotesk", sans-serif;
+    font-weight: 400;
+    font-size: var(--fs-xl);
+    line-height: 1.4;
+    color: var(--ink);
+    max-width: 62ch;
+    margin-bottom: 22px;
+  }
+  header.head .title .accent { color: var(--accent); }
+
+  .head-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px 40px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--fs-sm);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .head-meta .item .label {
+    color: var(--ink-faint);
+    margin-right: 10px;
+  }
+  .head-meta .item .val { color: var(--ink); }
+  .head-meta a:hover .val { color: var(--accent); }
+
+  /* ---------- section label ---------- */
+  section { padding: 56px 0 24px; }
+  .section-label {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--fs-md);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin-bottom: 36px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .section-label .star { color: var(--accent); font-size: var(--fs-lg); }
+  .section-label .num { margin-left: auto; color: var(--ink-faint); }
+
+  /* ---------- experience rows ---------- */
+  .row {
+    display: grid;
+    grid-template-columns: 150px 1fr 180px;
+    gap: 32px;
+    padding: 20px 0;
+    border-top: 1px solid var(--rule);
+    align-items: baseline;
+  }
+  .row:last-of-type { border-bottom: 1px solid var(--rule); }
+
+  .row .date {
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--fs-sm);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .row .body h3 {
+    font-family: "Space Grotesk", sans-serif;
+    font-weight: 500;
+    font-size: var(--fs-xl);
+    line-height: 1.3;
+    letter-spacing: -0.005em;
+    color: var(--ink);
+    margin-bottom: 4px;
+  }
+  .row .body h3 .role {
+    color: var(--ink-dim);
+    font-weight: 400;
+  }
+  .row .body .sub {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: var(--fs-lg);
+    line-height: 1.45;
+    color: var(--ink-dim);
+    max-width: 70ch;
+  }
+  .link-card {
+    display: grid;
+    grid-template-columns: 160px 1fr auto;
+    gap: 18px;
+    align-items: center;
+    margin-top: 16px;
+    padding: 14px;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: rgba(255,255,255,0.015);
+    transition: border-color 0.2s, background 0.2s;
+    max-width: 640px;
+  }
+  .link-card:hover {
+    border-color: var(--accent-soft);
+    background: rgba(106,160,255,0.04);
+  }
+  .link-card .thumb {
+    width: 160px;
+    height: 90px;
+    object-fit: cover;
+    border-radius: 2px;
+    display: block;
+    background: var(--bg);
+  }
+  .link-card .meta .src {
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .link-card .meta .t {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: var(--fs-lg);
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--ink);
+    margin-bottom: 4px;
+  }
+  .link-card .meta .d {
+    font-family: "Space Grotesk", sans-serif;
+    font-size: var(--fs-sm);
+    line-height: 1.4;
+    color: var(--ink-dim);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .link-card .arr {
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--fs-md);
+    color: var(--ink-faint);
+    padding: 0 6px;
+  }
+  .link-card:hover .arr { color: var(--accent); }
+  .row .place {
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--fs-xs);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    text-align: right;
+  }
+
+  .row.edu .body h3 { font-size: var(--fs-xl); }
+  .row.edu .body .sub { font-size: var(--fs-lg); }
+
+  .prev-line {
+    padding: 14px 0 10px;
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--fs-sm);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    border-top: 1px solid var(--rule);
+  }
+  .prev-line .lbl { color: var(--ink-dim); margin-right: 14px; }
+  .prev-line .names { color: var(--ink-dim); }
+
+  .sub-head {
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--fs-sm);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 32px 0 12px;
+  }
+
+  /* ---------- focus chips ---------- */
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .chip {
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--fs-xs);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    border: 1px solid var(--rule);
+    padding: 6px 12px;
+    border-radius: 2px;
+  }
+  .chip.accent { color: var(--accent); border-color: var(--accent-soft); }
+
+  /* ---------- footer ---------- */
+  footer.foot {
+    margin-top: 56px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: "JetBrains Mono", monospace;
+    font-size: var(--fs-2xs);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .page::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,0.012) 1px, transparent 1px);
+    background-size: 80px 100%;
+    pointer-events: none;
+    z-index: 100;
+    mix-blend-mode: overlay;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+
+  <nav class="top">
+    <div class="brand">CHENGXI&nbsp;LI</div>
+    <div class="nav-right">
+      <ul>
+        <li><a href="#experience">Experience</a></li>
+        <li><a href="#focus">Focus</a></li>
+        <li><a href="#contact">Contact</a></li>
+      </ul>
+      <button id="theme-toggle" class="theme-toggle" aria-label="Toggle color theme" title="Toggle theme">◐</button>
+    </div>
+  </nav>
+
+  <!-- ============== HEADER ============== -->
+  <header class="head">
+    <div class="head-text">
+      <div class="name">Chengxi Li</div>
+      <div class="title">Member of Technical Staff, <span class="accent">Fireworks AI</span> — post-training infrastructure &amp; agentic RL for LLMs.</div>
+
+      <div class="head-meta">
+        <div class="item"><span class="label">Based</span><span class="val">Bay Area</span></div>
+        <a class="item" href="mailto:chengxilics@gmail.com"><span class="label">Email</span><span class="val">chengxilics@gmail.com</span></a>
+        <a class="item" href="https://linkedin.com/in/chengxi-li-170694291" target="_blank" rel="noopener"><span class="label">LinkedIn</span><span class="val">chengxi-li</span></a>
+        <a class="item" href="https://github.com/Hecate0821" target="_blank" rel="noopener"><span class="label">GitHub</span><span class="val">@Hecate0821</span></a>
+      </div>
+    </div>
+    <div class="head-photo-frame">
+      <img class="head-photo" src="photo.jpg" alt="Chengxi Li" />
+    </div>
+  </header>
+
+  <!-- ============== EXPERIENCE (work + education) ============== -->
+  <section id="experience">
+    <div class="section-label"><span class="star">✦</span> Experience <span class="num">01 / 02</span></div>
+
+    <div class="sub-head">Work</div>
+
+    <div class="row">
+      <div class="date">2026 — Present</div>
+      <div class="body">
+        <h3>Fireworks AI <span class="role">— Member of Technical Staff</span></h3>
+        <div class="sub">Post-training infrastructure and agentic RL for the Fireworks LLM platform.</div>
+        <a class="link-card" href="https://fireworks.ai/blog/scaling-optimizing-frontier-model-training" target="_blank" rel="noopener">
+          <img class="thumb" src="https://fireworks.ai/images/blog/scaling-optimizing-training-hero.png" alt="" loading="lazy" />
+          <div class="meta">
+            <div class="src">Fireworks AI · Blog</div>
+            <div class="t">Scaling and Optimizing Frontier Model Training</div>
+            <div class="d">Fireworks Training SDK — the model catalog, parallelism stack, precision kernels, and memory optimizations for fine-tuning trillion-parameter MoE models.</div>
+          </div>
+          <span class="arr">→</span>
+        </a>
+      </div>
+      <div class="place">San Francisco</div>
+    </div>
+
+    <div class="row">
+      <div class="date">2025 · Jun — Dec</div>
+      <div class="body">
+        <h3>SGLang RL Team <span class="role">— Contributor (slime · veRL · SGLang)</span></h3>
+        <div class="sub">Open-source contributor for RL systems.</div>
+      </div>
+      <div class="place">Remote</div>
+    </div>
+
+    <div class="prev-line">
+      <span class="lbl">Previously</span><span class="names">Software Engineering Intern · Amazon · Baidu · Vivo</span>
+    </div>
+
+    <div class="sub-head">Education</div>
+
+    <div class="row edu">
+      <div class="date">2024 — 2025</div>
+      <div class="body">
+        <h3>Carnegie Mellon University <span class="role">— M.S.</span></h3>
+        <div class="sub">Mobile &amp; Internet-of-Things Engineering.</div>
+      </div>
+      <div class="place">Pittsburgh, PA</div>
+    </div>
+
+    <div class="row edu">
+      <div class="date">2020 — 2024</div>
+      <div class="body">
+        <h3>Xidian University <span class="role">— B.Eng.</span></h3>
+        <div class="sub">Software Engineering.</div>
+      </div>
+      <div class="place">Xi'an, China</div>
+    </div>
+  </section>
+
+  <!-- ============== FOCUS ============== -->
+  <section id="focus">
+    <div class="section-label"><span class="star">✦</span> Focus <span class="num">02 / 02</span></div>
+
+    <div class="chips">
+      <span class="chip accent">LLM Post-Training</span>
+      <span class="chip accent">Agentic RL</span>
+    </div>
+
+    <footer class="foot" id="contact">
+      <div>© 2026 — Chengxi Li</div>
+      <div>Last updated · Apr 2026</div>
+    </footer>
+  </section>
+</div>
+<script>
+  (function(){
+    var btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+    btn.addEventListener('click', function(){
+      var cur = document.documentElement.getAttribute('data-theme') || 'dark';
+      var next = cur === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('theme', next); } catch (e) {}
+    });
+    // follow system changes when the user hasn't made an explicit choice
+    if (mq && mq.addEventListener) {
+      mq.addEventListener('change', function(e){
+        try {
+          if (localStorage.getItem('theme')) return;
+        } catch (_) {}
+        document.documentElement.setAttribute('data-theme', e.matches ? 'light' : 'dark');
+      });
+    }
+  })();
+</script>
+</body>
+</html>
