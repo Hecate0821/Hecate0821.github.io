@@ -100,27 +100,6 @@
     pointer-events: none;
   }
 
-  /* viewport-fixed ASCII background; color follows theme via --ink-faint,
-     so it fades along with the global light/dark transition */
-  pre.token-flow {
-    position: fixed;
-    inset: 0;
-    margin: 0;
-    padding: 0;
-    width: 100vw;
-    height: 100vh;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
-    font-size: 13px;
-    line-height: 1.35;
-    letter-spacing: 0;
-    color: var(--ink-dim);
-    opacity: 0.4;
-    white-space: pre;
-    overflow: hidden;
-    user-select: none;
-    pointer-events: none;
-    z-index: 0;
-  }
   .corner.tl { top: 28px; left: 28px; border-right: none; border-bottom: none; }
   .corner.tr { top: 28px; right: 28px; border-left: none; border-bottom: none; }
   .corner.bl { bottom: 28px; left: 28px; border-right: none; border-top: none; }
@@ -432,7 +411,6 @@
 </style>
 </head>
 <body>
-<pre class="token-flow" aria-hidden="true"></pre>
 <div class="page">
   <div class="corner tl"></div>
   <div class="corner tr"></div>
@@ -542,164 +520,6 @@
     </footer>
   </section>
 </div>
-<script>
-(function(){
-  // ---- token-flow background ------------------------------------------
-  // the viewport is mostly empty. a small number of "tracks" occasionally
-  // spawn an LLM / RL formula that drifts slowly from left to right.
-  // when a track's formula exits the right edge it cools down, waits,
-  // then picks another formula from the pool.
-  var el = document.querySelector('pre.token-flow');
-  if (!el) return;
-
-  // math-only pool: attention & transformer building blocks, post-training
-  // losses, and the RL objectives used in modern LLM alignment. no pseudocode.
-  var FORMULAS = [
-    // --- attention / transformer math ---
-    'Attention(Q,K,V) = softmax(Q·Kᵀ / √d_k) · V',
-    'MultiHead(Q,K,V) = Concat(head_1, …, head_h) · W_O',
-    'head_i = softmax( (x·W_Q^i)(x·W_K^i)ᵀ / √d ) · (x·W_V^i)',
-    'FFN(x) = W_2 · gelu(W_1 · x + b_1) + b_2',
-    'SwiGLU(x) = (W_1 x ⊙ σ(W_gate x)) · W_2',
-    'RoPE(q, m) = q · cos_m + rotate(q) · sin_m',
-    'LN(x) = (x − μ) / √(σ² + ε) · γ + β',
-    'RMSNorm(x) = x / √(mean(x²) + ε) · γ',
-    'y = x + Attn(LN(x));   y = y + MLP(LN(y))',
-    // --- post-training losses ---
-    'L_SFT(θ) = − Σ_t log π_θ(y_t | y_<t, x)',
-    'H(p) = − Σ_x p(x) log p(x)',
-    'KL(p ‖ q) = Σ_x p(x) log( p(x) / q(x) )',
-    // --- RL / policy-grad objectives ---
-    'ρ_t(θ) = π_θ(a_t|s_t) / π_old(a_t|s_t)',
-    'J_PPO(θ) = 𝔼_t[ min( ρ_t · Â_t, clip(ρ_t, 1−ε, 1+ε) · Â_t ) ]',
-    'J_GRPO(θ) = (1/G) Σ_i 𝔼[ min(ρ_i · Â_i, clip(ρ_i, 1−ε, 1+ε) · Â_i) ] − β · KL(π_θ ‖ π_ref)',
-    'Â_i = (r_i − mean(r_{1..G})) / std(r_{1..G})',
-    'J_CISPO(θ) = 𝔼[ stop_grad( clip(ρ, 1−ε_low, 1+ε_high) ) · ρ · Â ]',
-    'ρ̂ = min(ρ, c̄)        (truncated importance sampling)',
-    'ρ̂ = clip(ρ, 1−ε, 1+ε)',
-    'L_DPO = − log σ( β · log(π_θ/π_ref)(y_w|x) − β · log(π_θ/π_ref)(y_l|x) )',
-    'L_IPO = ( log(π_θ/π_ref)(y_w|x) − log(π_θ/π_ref)(y_l|x) − 1/(2β) )²',
-    'L_KTO = w_+ · (1 − σ(β·z_+)) + w_− · (1 − σ(−β·z_−))',
-    '∇_θ J(θ) = 𝔼[ ∇_θ log π_θ(a|s) · Â(s,a) ]',
-    'Â_t^{GAE(γ,λ)} = Σ_l (γλ)^l · δ_{t+l},    δ_t = r_t + γ·V(s_{t+1}) − V(s_t)',
-    'V_π(s) = 𝔼_π[ Σ_t γ^t r_t | s_0 = s ]',
-    'Q_π(s,a) = 𝔼_π[ Σ_t γ^t r_t | s_0 = s, a_0 = a ]'
-  ];
-
-  function measureCell() {
-    var probe = document.createElement('span');
-    probe.style.cssText =
-      'position:absolute;visibility:hidden;white-space:pre;' +
-      'font-family:"JetBrains Mono",ui-monospace,monospace;' +
-      'font-size:13px;line-height:1.35;letter-spacing:0;';
-    probe.textContent = 'M'.repeat(200);
-    document.body.appendChild(probe);
-    var w = probe.getBoundingClientRect().width / 200;
-    document.body.removeChild(probe);
-    return { w: w, h: 13 * 1.35 };
-  }
-
-  var CELL = measureCell();
-  var COLS = 0, ROWS = 0;
-  function resize() {
-    COLS = Math.ceil(window.innerWidth  / CELL.w) + 1;
-    ROWS = Math.ceil(window.innerHeight / CELL.h) + 1;
-    // reseat every active track so none are orphaned off-viewport
-    for (var i = 0; i < tracks.length; i++) retire(tracks[i]);
-  }
-
-  function rnd() { return Math.random(); }
-  function pick(arr) { return arr[(rnd() * arr.length) | 0]; }
-
-  // up to 8 formulas in flight at once, across all rows
-  var N_TRACKS = 8;
-  var tracks = [];
-  for (var i = 0; i < N_TRACKS; i++) {
-    tracks.push({ active: false, cooldown: (i * 25 + (rnd()*40)|0), row: 0, text: '', col: 0, speed: 0.06 });
-  }
-
-  function activate(t) {
-    t.active = true;
-    t.text = pick(FORMULAS);
-    t.row = (rnd() * Math.max(1, ROWS)) | 0;
-    t.col = -t.text.length;          // start fully off the left edge
-    t.speed = 0.05 + rnd() * 0.07;   // 0.05 .. 0.12 chars/frame
-  }
-  function retire(t) {
-    t.active = false;
-    t.cooldown = 60 + ((rnd() * 180) | 0);   // 1 – 4 s before next formula
-  }
-
-  // each frame: advance active tracks, tick cooldowns, then render
-  function frame() {
-    // step tracks
-    for (var i = 0; i < tracks.length; i++) {
-      var t = tracks[i];
-      if (!t.active) {
-        if (--t.cooldown <= 0) activate(t);
-      } else {
-        t.col += t.speed;
-        if (t.col > COLS + 2) retire(t);
-      }
-    }
-
-    // build viewport as array of row buffers (all spaces)
-    var rows = new Array(ROWS);
-    for (var r = 0; r < ROWS; r++) rows[r] = null;
-
-    // paint active formulas
-    for (var i = 0; i < tracks.length; i++) {
-      var t = tracks[i];
-      if (!t.active) continue;
-      if (t.row < 0 || t.row >= ROWS) continue;
-      var buf = rows[t.row];
-      if (!buf) { buf = new Array(COLS); for (var c = 0; c < COLS; c++) buf[c] = ' '; rows[t.row] = buf; }
-      var startCol = Math.floor(t.col);
-      for (var k = 0; k < t.text.length; k++) {
-        var c = startCol + k;
-        if (c >= 0 && c < COLS) buf[c] = t.text.charAt(k);
-      }
-    }
-
-    // stringify
-    var out = '';
-    var blank = null;
-    for (var r = 0; r < ROWS; r++) {
-      if (rows[r]) {
-        out += rows[r].join('') + '\n';
-      } else {
-        if (!blank) { blank = ' '.repeat(COLS); }
-        out += blank + '\n';
-      }
-    }
-    el.textContent = out;
-    requestAnimationFrame(frame);
-  }
-
-  resize();
-  window.addEventListener('resize', function(){ CELL = measureCell(); resize(); });
-
-  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    requestAnimationFrame(frame);
-  } else {
-    // static snapshot: one sample formula centered vertically
-    var blank = ' '.repeat(COLS);
-    var out = '';
-    var midRow = Math.floor(ROWS / 2);
-    var sample = FORMULAS[0];
-    var leftCol = Math.max(0, Math.floor((COLS - sample.length) / 2));
-    for (var r = 0; r < ROWS; r++) {
-      if (r === midRow) {
-        var line = blank.substring(0, leftCol) + sample + blank.substring(leftCol + sample.length);
-        out += line.substring(0, COLS) + '\n';
-      } else {
-        out += blank + '\n';
-      }
-    }
-    el.textContent = out;
-  }
-})();
-</script>
 <script>
   (function(){
     var btn = document.getElementById('theme-toggle');
