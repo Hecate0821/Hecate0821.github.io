@@ -99,6 +99,28 @@
     border: 1px solid var(--ink-faint);
     pointer-events: none;
   }
+
+  /* viewport-fixed ASCII background; color follows theme via --ink-faint,
+     so it fades along with the global light/dark transition */
+  pre.token-flow {
+    position: fixed;
+    inset: 0;
+    margin: 0;
+    padding: 0;
+    width: 100vw;
+    height: 100vh;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 13px;
+    line-height: 1.35;
+    letter-spacing: 0;
+    color: var(--ink-faint);
+    opacity: 0.14;
+    white-space: pre;
+    overflow: hidden;
+    user-select: none;
+    pointer-events: none;
+    z-index: 0;
+  }
   .corner.tl { top: 28px; left: 28px; border-right: none; border-bottom: none; }
   .corner.tr { top: 28px; right: 28px; border-left: none; border-bottom: none; }
   .corner.bl { bottom: 28px; left: 28px; border-right: none; border-top: none; }
@@ -281,7 +303,8 @@
     border: 1px solid var(--rule);
     border-radius: 4px;
     background: rgba(255,255,255,0.015);
-    transition: border-color 0.2s, background 0.2s;
+    transition: border-color 2.2s cubic-bezier(0.33, 0, 0.2, 1),
+                background-color 2.2s cubic-bezier(0.33, 0, 0.2, 1);
     max-width: 640px;
   }
   .link-card:hover {
@@ -409,6 +432,7 @@
 </style>
 </head>
 <body>
+<pre class="token-flow" aria-hidden="true"></pre>
 <div class="page">
   <div class="corner tl"></div>
   <div class="corner tr"></div>
@@ -518,6 +542,155 @@
     </footer>
   </section>
 </div>
+<script>
+(function(){
+  // ---- token-flow background ------------------------------------------
+  // a schematic of an LLM training/inference loop. rows are stages; the
+  // structure is static, the values/packets/tokens inside each row animate.
+  // rendered via textContent into a fixed-position <pre>, centered in the
+  // viewport. kept intentionally dim so it reads as texture, not content.
+  var el = document.querySelector('pre.token-flow');
+  if (!el) return;
+
+  function measureCell() {
+    var probe = document.createElement('span');
+    probe.style.cssText =
+      'position:absolute;visibility:hidden;white-space:pre;' +
+      'font-family:"JetBrains Mono",ui-monospace,monospace;' +
+      'font-size:13px;line-height:1.35;letter-spacing:0;';
+    probe.textContent = 'M'.repeat(200);
+    document.body.appendChild(probe);
+    var w = probe.getBoundingClientRect().width / 200;
+    document.body.removeChild(probe);
+    return { w: w, h: 13 * 1.35 };
+  }
+
+  var CELL = measureCell();
+  var COLS = 0, ROWS = 0;
+  function resize() {
+    COLS = Math.ceil(window.innerWidth  / CELL.w) + 1;
+    ROWS = Math.ceil(window.innerHeight / CELL.h) + 1;
+  }
+  resize();
+  window.addEventListener('resize', function(){ CELL = measureCell(); resize(); rebuildBG(); });
+
+  var BG = '·';
+  var BLOCKS = ['░','▒','▓','█','▓','▒'];
+
+  function blocks(frameN, w, seed) {
+    var out = '';
+    for (var i = 0; i < w; i++) {
+      var k = (frameN * 0.13 + i * 1.7 + seed) | 0;
+      out += BLOCKS[((k % BLOCKS.length) + BLOCKS.length) % BLOCKS.length];
+    }
+    return out;
+  }
+  function track(frameN, n, speed) {
+    var pos = Math.floor(frameN * speed) % (n * 2);
+    var p = pos < n ? pos : (n * 2 - pos - 1);
+    var out = '';
+    for (var i = 0; i < n; i++) out += (i === p) ? '▸' : (i < p ? '─' : '·');
+    return out;
+  }
+  function moe(frameN) {
+    var a1 = (frameN >> 4) % 8;
+    var a2 = ((frameN >> 4) + 3) % 8;
+    var out = '';
+    for (var i = 0; i < 8; i++) out += (i === a1 || i === a2) ? '[■]' : '[·]';
+    return out;
+  }
+  var ROLL = ['▁the','▁model','▁learns','▁from','▁reward','▁signal','<|eos|>',
+              '▁sample','▁from','▁π(a|s)','<|eos|>',
+              '▁policy','▁gradient','▁ascent','<|eos|>'];
+  var rollBuf = '', rollIdx = 0;
+  function rollout(frameN) {
+    if ((frameN % 10) === 0) {
+      var tok = ROLL[rollIdx % ROLL.length]; rollIdx++;
+      if (tok === '<|eos|>' || rollBuf.length + tok.length > 36) rollBuf = '';
+      else rollBuf += tok;
+    }
+    return rollBuf + (((frameN >> 3) & 1) ? '▌' : ' ');
+  }
+  function lossVal(f) { return (0.6183 + Math.sin(f*0.015)*0.04 - f*0.00001).toFixed(4); }
+  function rewVal(f)  { var v = 0.72 + Math.sin(f*0.021)*0.08; return (v>=0?'+':'') + v.toFixed(3); }
+  function step(f)    { return String(14823 + Math.floor(f/6)).padStart(6,' '); }
+  function head(f)    { return String(((f>>5) % 48) + 1).padStart(2,' '); }
+  function sca(f,s)   { var v = Math.sin(f*0.04+s)*0.5 + Math.cos(f*0.013+s*3.7)*0.4; return (v>=0?'+':'') + v.toFixed(2); }
+
+  function sTokens(f)   { return '[tokens ]   input ─▶  ' + blocks(f,6,0) + '  embed → x'; }
+  function sMatmul(f)   { return '[matmul ]   A[' + blocks(f,6,3) + '] · B[' + blocks(f,6,9) + ']  =  C[' + blocks(f,6,15) + ']   ' + track(f,10,0.35); }
+  function sAttn(f)     { return '[attn   ]   softmax( Q·Kᵀ / √d ) · V    head ' + head(f) + '/48    qk = ' + sca(f,1); }
+  function sMLP(f)      { return '[MLP    ]   x → W₁·x → gelu → W₂·x′ → y     ' + track(f,14,0.4); }
+  function sMoE(f)      { return '[MoE    ]   x → router → ' + moe(f) + '   top-k 2/8'; }
+  function sRollout(f)  { return '[rollout]   π(a|s) → sample → ' + rollout(f); }
+  function sReward(f)   { return '[reward ]   r = Σ γ·r       =  ' + rewVal(f); }
+  function sLoss(f)     { return '[loss   ]   L = −𝔼[r] · log π(a|s)   =  ' + lossVal(f); }
+  function sBack(f)     { return '[∇θ     ]   ' + track(f,18,-0.45) + '  backward · propagating'; }
+  function sUpdate(f)   { return '[update ]   θ ← θ − η·∇L    η = 2.5e-5    step ' + step(f); }
+
+  var SCENES = [sTokens, sMatmul, sAttn, sMLP, sMoE, sRollout, sReward, sLoss, sBack, sUpdate];
+  var ROW_GAP = 2;
+
+  var bgRow = '';
+  function rebuildBG() { bgRow = BG.repeat(COLS); }
+  rebuildBG();
+
+  function placeAt(line, leftCol) {
+    if (leftCol >= COLS) return bgRow;
+    var end = Math.min(COLS, leftCol + line.length);
+    return bgRow.slice(0, leftCol) + line.slice(0, end - leftCol) + bgRow.slice(end);
+  }
+
+  var f = 0;
+  function frame() {
+    f++;
+    var blockH = SCENES.length * (ROW_GAP + 1) - ROW_GAP;
+    var startR = Math.max(0, Math.floor((ROWS - blockH) / 2));
+    // horizontally center the widest rendered line
+    var lines = new Array(SCENES.length);
+    var maxW = 0;
+    for (var i = 0; i < SCENES.length; i++) {
+      lines[i] = SCENES[i](f);
+      if (lines[i].length > maxW) maxW = lines[i].length;
+    }
+    var leftCol = Math.max(0, Math.floor((COLS - maxW) / 2));
+
+    var out = '';
+    for (var r = 0; r < ROWS; r++) {
+      var rel = r - startR;
+      if (rel >= 0 && rel < blockH && (rel % (ROW_GAP + 1)) === 0) {
+        out += placeAt(lines[rel / (ROW_GAP + 1)], leftCol) + '\n';
+      } else {
+        out += bgRow + '\n';
+      }
+    }
+    el.textContent = out;
+    requestAnimationFrame(frame);
+  }
+
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    requestAnimationFrame(frame);
+  } else {
+    // static snapshot
+    var blockH = SCENES.length * (ROW_GAP + 1) - ROW_GAP;
+    var startR = Math.max(0, Math.floor((ROWS - blockH) / 2));
+    var lines = SCENES.map(function(fn){ return fn(0); });
+    var maxW = 0;
+    for (var i = 0; i < lines.length; i++) if (lines[i].length > maxW) maxW = lines[i].length;
+    var leftCol = Math.max(0, Math.floor((COLS - maxW) / 2));
+    var out = '';
+    for (var r = 0; r < ROWS; r++) {
+      var rel = r - startR;
+      if (rel >= 0 && rel < blockH && (rel % (ROW_GAP + 1)) === 0) {
+        out += placeAt(lines[rel / (ROW_GAP + 1)], leftCol) + '\n';
+      } else {
+        out += bgRow + '\n';
+      }
+    }
+    el.textContent = out;
+  }
+})();
+</script>
 <script>
   (function(){
     var btn = document.getElementById('theme-toggle');
