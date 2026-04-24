@@ -432,7 +432,7 @@
 
       <div class="head-meta">
         <div class="item"><span class="label">Based</span><span class="val">Bay Area</span></div>
-        <a class="item" href="mailto:chengxilics@gmail.com"><span class="label">Email</span><span class="val">chengxilics@gmail.com</span></a>
+        <a class="item email-link" href="#" data-u="chengxilics" data-d="gmail.com"><span class="label">Email</span><span class="val">[enable JavaScript]</span></a>
         <a class="item" href="https://linkedin.com/in/chengxi-li-170694291" target="_blank" rel="noopener"><span class="label">LinkedIn</span><span class="val">chengxi-li</span></a>
         <a class="item" href="https://github.com/Hecate0821" target="_blank" rel="noopener"><span class="label">GitHub</span><span class="val">@Hecate0821</span></a>
       </div>
@@ -534,6 +534,23 @@
         } catch (_) {}
         document.documentElement.setAttribute('data-theme', e.matches ? 'light' : 'dark');
       });
+    }
+  })();
+
+  // obfuscated email: the address is never present as a single string in
+  // the HTML source or the mailto href. it's assembled from data-* parts
+  // at runtime, so naive scrapers that don't run JS won't see it.
+  (function(){
+    var links = document.querySelectorAll('a.email-link');
+    for (var i = 0; i < links.length; i++) {
+      var a = links[i];
+      var u = a.getAttribute('data-u');
+      var d = a.getAttribute('data-d');
+      if (!u || !d) continue;
+      var addr = u + String.fromCharCode(64) + d;
+      a.setAttribute('href', 'mai' + 'lto:' + addr);
+      var val = a.querySelector('.val');
+      if (val) val.textContent = addr;
     }
   })();
 </script>
