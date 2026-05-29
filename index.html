@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=1280" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Chengxi Li — Résumé</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -336,6 +336,46 @@
   }
 
   .page::before { display: none; }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 860px) {
+    .page { padding: 28px 28px 64px; }
+    header.head {
+      grid-template-columns: 1fr;
+      gap: 28px;
+    }
+    header.head .head-photo-frame { width: 150px; }
+    header.head .head-photo { height: 184px; }
+    section { padding: 48px 0 12px; }
+    .row {
+      grid-template-columns: 1fr;
+      gap: 6px;
+      padding: 16px 0;
+      align-items: start;
+    }
+    .row .place { text-align: left; }
+    .row .body .sub,
+    .row.blog-row .body .sub,
+    .link-card { max-width: none; }
+  }
+  @media (max-width: 520px) {
+    :root { --fs-display: 44px; }
+    .page { padding: 22px 18px 52px; }
+    .theme-toggle { top: 16px; right: 16px; }
+    header.head .title { font-size: 21px; }
+    header.head .title.previous { font-size: var(--fs-md); }
+    .head-meta { gap: 10px 24px; font-size: var(--fs-sm); }
+    .section-label { font-size: var(--fs-lg); margin-bottom: 20px; }
+    .row .body h3 { font-size: 22px; }
+    .row.blog-row .body h3 { font-size: 23px; }
+    .row.blog-row .body .sub { font-size: var(--fs-lg); }
+    .link-card .meta .t { font-size: var(--fs-lg); }
+    footer.foot {
+      flex-direction: column;
+      gap: 8px;
+      align-items: flex-start;
+    }
+  }
 </style>
 </head>
 <body>

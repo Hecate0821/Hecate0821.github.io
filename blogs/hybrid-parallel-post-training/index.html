@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-  <meta name="viewport" content="width=1280">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>The Load-Balance Problem Behind Hybrid Parallelism</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -253,9 +253,18 @@
       .parallel-map { grid-template-columns: 1fr 1fr; }
     }
     @media (max-width: 720px) {
-      .page { padding: 40px 28px 72px; }
+      :root {
+        --fs-display: 38px;
+        --fs-section: 26px;
+        --fs-prose: 18px;
+      }
+      .page { padding: 32px 22px 64px; }
+      .back-link { margin-bottom: 48px; }
+      header.post-head { padding: 0 0 48px; }
+      section { padding: 40px 0 8px; }
       .parallel-map { grid-template-columns: 1fr; }
       .figure-image { width: 100%; }
+      .theme-toggle { top: 16px; right: 16px; }
     }
   </style>
 </head>
