@@ -6,7 +6,7 @@
 <title>Chengxi Li — Résumé</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&display=swap" rel="stylesheet" />
 <script>
   (function(){
     try {
@@ -21,11 +21,11 @@
 </script>
 <style>
   :root, [data-theme="dark"] {
-    --bg: #0a0d12;
-    --ink: #e8ecf1;
-    --ink-dim: #8a94a4;
-    --ink-faint: #4c5565;
-    --rule: #1a2030;
+    --bg: #161310;
+    --ink: #f4efe5;
+    --ink-dim: #bdb3a4;
+    --ink-faint: #746a5f;
+    --rule: #3a332c;
     --accent: #6aa0ff;
     --accent-soft: #2b3a5c;
     --photo-bg: #0e1219;
@@ -34,29 +34,29 @@
     --photo-shadow: 0 12px 40px -20px rgba(0,0,0,0.85);
   }
   [data-theme="light"] {
-    --bg: #ece4d3;
-    --ink: #1a1b1e;
-    --ink-dim: #5c5a54;
-    --ink-faint: #a39d8c;
-    --rule: #d4ccba;
+    --bg: #f7f0e4;
+    --ink: #1f1a15;
+    --ink-dim: #675f55;
+    --ink-faint: #9d9284;
+    --rule: #d8ccba;
     --accent: #2a62d0;
-    --accent-soft: #c0d2ed;
-    --photo-bg: #ddd4be;
+    --accent-soft: #b7c9e8;
+    --photo-bg: #e7dccb;
     --photo-vignette: transparent;
     --photo-filter: none;
-    --photo-shadow: 0 10px 32px -18px rgba(60,50,30,0.30);
+    --photo-shadow: none;
   }
-  /* ---------- unified, viewport-responsive type scale ----------
-     linear ramp: floor at 1280px-wide viewport, target (current 4K)
-     at 2560px+. one scale governs every font-size in the document. */
   :root {
-    --fs-2xs:     clamp(8px,  calc(6px  + 0.15625vw),  10px);
-    --fs-xs:      clamp(9px,  calc(7px  + 0.15625vw),  11px);
-    --fs-sm:      clamp(10px, calc(8px  + 0.15625vw),  12px);
-    --fs-md:      clamp(11px, calc(9px  + 0.15625vw),  13px);
-    --fs-lg:      clamp(12px, calc(10px + 0.15625vw),  14px);
-    --fs-xl:      clamp(14px, calc(10px + 0.3125vw),   18px);
-    --fs-display: clamp(28px, calc(16px + 0.9375vw),   40px);
+    --font-blog: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --fs-2xs: 12px;
+    --fs-xs: 13px;
+    --fs-sm: 14px;
+    --fs-md: 16px;
+    --fs-lg: 18px;
+    --fs-xl: 24px;
+    --fs-display: 68px;
+    --tracking-tight: -0.02em;
+    --tracking-ui: 0;
   }
   /* soft cross-fade when the theme flips; easier on the eyes than a hard swap */
   *, *::before, *::after {
@@ -72,10 +72,10 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { background: var(--bg); color: var(--ink); }
   body {
-    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-family: var(--font-blog);
     font-size: var(--fs-md);
-    line-height: 1.55;
-    letter-spacing: 0.005em;
+    line-height: 1.5;
+    letter-spacing: 0;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
     overflow-x: hidden;
@@ -87,66 +87,37 @@
   .page {
     position: relative;
     z-index: 1;
-    max-width: 1100px;
+    max-width: 1180px;
     margin: 0 auto;
-    padding: 56px 72px 96px;
+    padding: 32px 48px 88px;
   }
 
-  .corner {
-    position: absolute;
-    width: 20px;
-    height: 20px;
-    border: 1px solid var(--ink-faint);
-    pointer-events: none;
-  }
-
-  .corner.tl { top: 28px; left: 28px; border-right: none; border-bottom: none; }
-  .corner.tr { top: 28px; right: 28px; border-left: none; border-bottom: none; }
-  .corner.bl { bottom: 28px; left: 28px; border-right: none; border-top: none; }
-  .corner.br { bottom: 28px; right: 28px; border-left: none; border-top: none; }
-
-  /* ---------- nav ---------- */
-  nav.top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
-    font-size: var(--fs-sm);
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--ink-dim);
-    padding-bottom: 72px;
-  }
-  nav.top .brand {
-    color: var(--ink);
-    letter-spacing: 0.22em;
-    font-weight: 500;
-  }
-  nav.top ul { list-style: none; display: flex; gap: 28px; }
-  nav.top a:hover { color: var(--ink); }
-  nav.top .nav-right { display: flex; align-items: center; gap: 24px; }
+  .corner { display: none; }
   .theme-toggle {
+    position: fixed;
+    top: 28px;
+    right: 32px;
+    z-index: 10;
+    appearance: none;
+    border: none;
+    border-bottom: 1px solid var(--accent-soft);
+    border-radius: 0;
     background: transparent;
-    border: 1px solid var(--rule);
     color: var(--ink-dim);
-    width: 30px;
-    height: 30px;
+    font-family: var(--font-blog);
+    font-size: var(--fs-sm);
+    line-height: 1.3;
     cursor: pointer;
-    font-family: inherit;
-    font-size: var(--fs-lg);
-    letter-spacing: 0;
-    display: grid;
-    place-items: center;
-    border-radius: 2px;
-    transition: color 0.15s, border-color 0.15s, background-color 0.15s;
     padding: 0;
   }
-  .theme-toggle:hover { color: var(--ink); border-color: var(--ink-faint); }
+  .theme-toggle:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
 
   /* ---------- header ---------- */
   header.head {
-    padding: 56px 0;
-    border-bottom: 1px solid var(--rule);
+    padding: 0 0 72px;
     display: grid;
     grid-template-columns: 1fr auto;
     gap: 48px;
@@ -155,104 +126,104 @@
   header.head .head-text { min-width: 0; }
   header.head .head-photo-frame {
     position: relative;
-    width: 160px;
+    width: 176px;
   }
   header.head .head-photo-frame::after {
     content: "";
     position: absolute;
     inset: 0;
-    border-radius: 2px;
+    border-radius: 0;
     box-shadow: inset 0 0 26px 2px var(--photo-vignette);
     pointer-events: none;
   }
   header.head .head-photo {
     display: block;
     width: 100%;
-    height: 200px;
+    height: 220px;
     object-fit: cover;
     object-position: center 20%;
-    border-radius: 2px;
+    border-radius: 0;
     filter: var(--photo-filter);
   }
   header.head .name {
-    font-family: "Space Grotesk", "Helvetica Neue", Arial, sans-serif;
-    font-weight: 500;
+    font-family: var(--font-blog);
+    font-weight: 600;
     font-size: var(--fs-display);
-    line-height: 1.05;
-    letter-spacing: -0.01em;
+    line-height: 0.96;
+    letter-spacing: var(--tracking-tight);
     color: var(--ink);
     margin-bottom: 18px;
   }
   header.head .title {
-    font-family: "Space Grotesk", sans-serif;
+    font-family: var(--font-blog);
     font-weight: 400;
-    font-size: var(--fs-xl);
-    line-height: 1.4;
+    font-size: 28px;
+    line-height: 1.22;
     color: var(--ink);
     max-width: 62ch;
-    margin-bottom: 22px;
+    margin-bottom: 10px;
   }
   header.head .title .accent { color: var(--accent); }
+  header.head .title.previous {
+    font-size: var(--fs-lg);
+    color: var(--ink-dim);
+    margin-bottom: 22px;
+  }
 
   .head-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 28px 40px;
-    font-family: "JetBrains Mono", monospace;
-    font-size: var(--fs-sm);
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
+    gap: 12px 32px;
+    font-family: var(--font-blog);
+    font-size: var(--fs-md);
+    letter-spacing: var(--tracking-ui);
+    text-transform: none;
     color: var(--ink-dim);
   }
   .head-meta .item .label {
     color: var(--ink-faint);
-    margin-right: 10px;
+    margin-right: 8px;
   }
   .head-meta .item .val { color: var(--ink); }
   .head-meta a:hover .val { color: var(--accent); }
 
   /* ---------- section label ---------- */
-  section { padding: 56px 0 24px; }
+  section { padding: 64px 0 12px; }
   .section-label {
-    display: flex;
-    align-items: baseline;
-    gap: 14px;
-    font-family: "JetBrains Mono", monospace;
-    font-size: var(--fs-md);
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
-    color: var(--ink-dim);
-    margin-bottom: 36px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--rule);
+    display: block;
+    font-family: var(--font-blog);
+    font-size: var(--fs-xl);
+    font-weight: 600;
+    letter-spacing: var(--tracking-ui);
+    text-transform: none;
+    color: var(--ink);
+    margin-bottom: 28px;
+    padding-bottom: 0;
   }
-  .section-label .star { color: var(--accent); font-size: var(--fs-lg); }
-  .section-label .num { margin-left: auto; color: var(--ink-faint); }
 
   /* ---------- experience rows ---------- */
   .row {
     display: grid;
-    grid-template-columns: 150px 1fr 180px;
+    grid-template-columns: 150px 1fr 160px;
     gap: 32px;
-    padding: 20px 0;
-    border-top: 1px solid var(--rule);
+    padding: 18px 0;
     align-items: baseline;
   }
-  .row:last-of-type { border-bottom: 1px solid var(--rule); }
+  .row + .row { margin-top: 18px; }
 
   .row .date {
-    font-family: "JetBrains Mono", monospace;
+    font-family: var(--font-blog);
     font-size: var(--fs-sm);
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    letter-spacing: var(--tracking-ui);
+    text-transform: none;
     color: var(--ink-dim);
   }
   .row .body h3 {
-    font-family: "Space Grotesk", sans-serif;
+    font-family: var(--font-blog);
     font-weight: 500;
-    font-size: var(--fs-xl);
-    line-height: 1.3;
-    letter-spacing: -0.005em;
+    font-size: 28px;
+    line-height: 1.16;
+    letter-spacing: var(--tracking-tight);
     color: var(--ink);
     margin-bottom: 4px;
   }
@@ -261,104 +232,76 @@
     font-weight: 400;
   }
   .row .body .sub {
-    font-family: "Space Grotesk", sans-serif;
+    font-family: var(--font-blog);
     font-size: var(--fs-lg);
     line-height: 1.45;
     color: var(--ink-dim);
     max-width: 70ch;
   }
   .link-card {
-    display: grid;
-    grid-template-columns: 160px 1fr auto;
-    gap: 18px;
-    align-items: center;
-    margin-top: 16px;
-    padding: 14px;
-    border: 1px solid var(--rule);
-    border-radius: 4px;
-    background: rgba(255,255,255,0.015);
-    transition: border-color 2.2s cubic-bezier(0.33, 0, 0.2, 1),
-                background-color 2.2s cubic-bezier(0.33, 0, 0.2, 1);
-    max-width: 640px;
+    display: block;
+    margin-top: 18px;
+    padding: 0 0 0 18px;
+    border-left: 1px solid var(--rule);
+    border-radius: 0;
+    background: transparent;
+    transition: border-color 2.2s cubic-bezier(0.33, 0, 0.2, 1);
+    max-width: 70ch;
   }
   .link-card:hover {
-    border-color: var(--accent-soft);
-    background: rgba(106,160,255,0.04);
-  }
-  .link-card .thumb {
-    width: 160px;
-    height: 90px;
-    object-fit: cover;
-    border-radius: 2px;
-    display: block;
-    background: var(--bg);
+    border-color: var(--accent);
   }
   .link-card .meta .src {
-    font-family: "JetBrains Mono", monospace;
-    font-size: var(--fs-2xs);
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--accent);
+    font-family: var(--font-blog);
+    font-size: var(--fs-sm);
+    letter-spacing: var(--tracking-ui);
+    text-transform: none;
+    color: var(--ink-faint);
     margin-bottom: 6px;
   }
   .link-card .meta .t {
-    font-family: "Space Grotesk", sans-serif;
-    font-size: var(--fs-lg);
+    font-family: var(--font-blog);
+    font-size: var(--fs-xl);
     font-weight: 500;
-    line-height: 1.3;
-    color: var(--ink);
+    line-height: 1.2;
+    color: var(--accent);
     margin-bottom: 4px;
   }
   .link-card .meta .d {
-    font-family: "Space Grotesk", sans-serif;
-    font-size: var(--fs-sm);
-    line-height: 1.4;
+    font-family: var(--font-blog);
+    font-size: var(--fs-md);
+    line-height: 1.45;
     color: var(--ink-dim);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
   }
   .link-card .arr {
-    font-family: "JetBrains Mono", monospace;
-    font-size: var(--fs-md);
-    color: var(--ink-faint);
-    padding: 0 6px;
+    display: none;
   }
-  .link-card:hover .arr { color: var(--accent); }
   .row .place {
-    font-family: "JetBrains Mono", monospace;
+    font-family: var(--font-blog);
     font-size: var(--fs-xs);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    letter-spacing: var(--tracking-ui);
+    text-transform: none;
     color: var(--ink-faint);
     text-align: right;
   }
 
-  .row.edu .body h3 { font-size: var(--fs-xl); }
-  .row.edu .body .sub { font-size: var(--fs-lg); }
-
-  .prev-line {
-    padding: 14px 0 10px;
-    font-family: "JetBrains Mono", monospace;
-    font-size: var(--fs-sm);
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--ink-faint);
-    border-top: 1px solid var(--rule);
+  .row.blog-row .body h3 {
+    font-size: 30px;
+    line-height: 1.12;
+    margin-bottom: 8px;
   }
-  .prev-line .lbl { color: var(--ink-dim); margin-right: 14px; }
-  .prev-line .names { color: var(--ink-dim); }
-
-  .sub-head {
-    font-family: "JetBrains Mono", monospace;
-    font-size: var(--fs-sm);
-    letter-spacing: 0.22em;
-    text-transform: uppercase;
+  .row.blog-row .body h3 a {
     color: var(--accent);
-    margin: 32px 0 12px;
+    border-bottom: 1px solid var(--accent-soft);
   }
-
+  .row.blog-row .body h3 a:hover {
+    border-color: var(--accent);
+  }
+  .row.blog-row .body .sub {
+    font-size: var(--fs-xl);
+    line-height: 1.45;
+    max-width: 68ch;
+  }
   /* ---------- focus chips ---------- */
   .chips {
     display: flex;
@@ -366,14 +309,14 @@
     gap: 8px;
   }
   .chip {
-    font-family: "JetBrains Mono", monospace;
+    font-family: var(--font-blog);
     font-size: var(--fs-xs);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: var(--tracking-ui);
+    text-transform: none;
     color: var(--ink-dim);
     border: 1px solid var(--rule);
     padding: 6px 12px;
-    border-radius: 2px;
+    border-radius: 0;
   }
   .chip.accent { color: var(--accent); border-color: var(--accent-soft); }
 
@@ -381,28 +324,18 @@
   footer.foot {
     margin-top: 56px;
     padding-top: 24px;
-    border-top: 1px solid var(--rule);
+    border-top: none;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-family: "JetBrains Mono", monospace;
+    font-family: var(--font-blog);
     font-size: var(--fs-2xs);
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
+    letter-spacing: var(--tracking-ui);
+    text-transform: none;
     color: var(--ink-faint);
   }
 
-  .page::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    background-image:
-      linear-gradient(to right, rgba(255,255,255,0.012) 1px, transparent 1px);
-    background-size: 80px 100%;
-    pointer-events: none;
-    z-index: 100;
-    mix-blend-mode: overlay;
-  }
+  .page::before { display: none; }
 </style>
 </head>
 <body>
@@ -411,29 +344,21 @@
   <div class="corner tr"></div>
   <div class="corner bl"></div>
   <div class="corner br"></div>
-
-  <nav class="top">
-    <div class="brand">CHENGXI&nbsp;LI</div>
-    <div class="nav-right">
-      <ul>
-        <li><a href="#experience">Experience</a></li>
-        <li><a href="#focus">Focus</a></li>
-      </ul>
-      <button id="theme-toggle" class="theme-toggle" aria-label="Toggle color theme" title="Toggle theme">◐</button>
-    </div>
-  </nav>
+  <button class="theme-toggle" type="button" aria-label="Switch color theme">Light</button>
 
   <!-- ============== HEADER ============== -->
   <header class="head">
     <div class="head-text">
       <div class="name">Chengxi Li</div>
       <div class="title">Member of Technical Staff, <span class="accent">Fireworks AI</span> — post-training infrastructure &amp; agentic RL for LLMs.</div>
+      <div class="title previous">Previously Software Engineering Intern · Amazon · Baidu · Vivo.</div>
 
       <div class="head-meta">
         <div class="item"><span class="label">Based</span><span class="val">Bay Area</span></div>
         <a class="item email-link" href="#" data-u="chengxilics" data-d="gmail.com"><span class="label">Email</span><span class="val">[enable JavaScript]</span></a>
         <a class="item" href="https://linkedin.com/in/chengxi-li-170694291" target="_blank" rel="noopener"><span class="label">LinkedIn</span><span class="val">chengxi-li</span></a>
         <a class="item" href="https://github.com/Hecate0821" target="_blank" rel="noopener"><span class="label">GitHub</span><span class="val">@Hecate0821</span></a>
+        <div class="item"><span class="label">Education</span><span class="val">CMU M.S. · Xidian B.Eng.</span></div>
       </div>
     </div>
     <div class="head-photo-frame">
@@ -443,9 +368,7 @@
 
   <!-- ============== EXPERIENCE (work + education) ============== -->
   <section id="experience">
-    <div class="section-label"><span class="star">✦</span> Experience <span class="num">01 / 02</span></div>
-
-    <div class="sub-head">Work</div>
+    <div class="section-label">Experience</div>
 
     <div class="row">
       <div class="date">2026 — Present</div>
@@ -453,7 +376,6 @@
         <h3>Fireworks AI <span class="role">— Member of Technical Staff</span></h3>
         <div class="sub">Post-training infrastructure and agentic RL for the Fireworks LLM platform.</div>
         <a class="link-card" href="https://fireworks.ai/blog/scaling-optimizing-frontier-model-training" target="_blank" rel="noopener">
-          <img class="thumb" src="https://fireworks.ai/images/blog/scaling-optimizing-training-hero.png" alt="" loading="lazy" />
           <div class="meta">
             <div class="src">Fireworks AI · Blog</div>
             <div class="t">Scaling and Optimizing Frontier Model Training</div>
@@ -474,34 +396,25 @@
       <div class="place">Remote</div>
     </div>
 
-    <div class="prev-line">
-      <span class="lbl">Previously</span><span class="names">Software Engineering Intern · Amazon · Baidu · Vivo</span>
-    </div>
+  </section>
 
-    <div class="sub-head">Education</div>
+  <!-- ============== BLOG ============== -->
+  <section id="blog">
+    <div class="section-label">Blog</div>
 
-    <div class="row edu">
-      <div class="date">2024 — 2025</div>
+    <div class="row blog-row">
+      <div class="date">2026 · May</div>
       <div class="body">
-        <h3>Carnegie Mellon University <span class="role">— M.S.</span></h3>
-        <div class="sub">Mobile &amp; Internet-of-Things Engineering.</div>
+        <h3><a href="blogs/hybrid-parallel-post-training/index.html">The Load-Balance Problem Behind Dynamic Context Parallelism</a></h3>
+        <div class="sub">A compact note on Megatron Dynamic-CP, ByteScale Hybrid Data Parallelism, and why DP, CP, and PP become coupled when sequence lengths vary.</div>
       </div>
-      <div class="place">Pittsburgh, PA</div>
-    </div>
-
-    <div class="row edu">
-      <div class="date">2020 — 2024</div>
-      <div class="body">
-        <h3>Xidian University <span class="role">— B.Eng.</span></h3>
-        <div class="sub">Software Engineering.</div>
-      </div>
-      <div class="place">Xi'an, China</div>
+      <div class="place">DP · CP · PP</div>
     </div>
   </section>
 
   <!-- ============== FOCUS ============== -->
   <section id="focus">
-    <div class="section-label"><span class="star">✦</span> Focus <span class="num">02 / 02</span></div>
+    <div class="section-label">Focus</div>
 
     <div class="chips">
       <span class="chip accent">LLM Post-Training</span>
@@ -515,26 +428,6 @@
   </section>
 </div>
 <script>
-  (function(){
-    var btn = document.getElementById('theme-toggle');
-    if (!btn) return;
-    var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
-    btn.addEventListener('click', function(){
-      var cur = document.documentElement.getAttribute('data-theme') || 'dark';
-      var next = cur === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', next);
-      try { localStorage.setItem('theme', next); } catch (e) {}
-    });
-    // follow system changes when the user hasn't made an explicit choice
-    if (mq && mq.addEventListener) {
-      mq.addEventListener('change', function(e){
-        try {
-          if (localStorage.getItem('theme')) return;
-        } catch (_) {}
-        document.documentElement.setAttribute('data-theme', e.matches ? 'light' : 'dark');
-      });
-    }
-  })();
 
   // obfuscated email: the address is never present as a single string in
   // the HTML source or the mailto href. it's assembled from data-* parts
@@ -551,6 +444,24 @@
       var val = a.querySelector('.val');
       if (val) val.textContent = addr;
     }
+  })();
+
+  (function(){
+    var button = document.querySelector('.theme-toggle');
+    if (!button) return;
+    function currentTheme() {
+      return document.documentElement.getAttribute('data-theme') || 'dark';
+    }
+    function render() {
+      button.textContent = currentTheme() === 'dark' ? 'Light' : 'Dark';
+    }
+    button.addEventListener('click', function(){
+      var next = currentTheme() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('theme', next); } catch (e) {}
+      render();
+    });
+    render();
   })();
 </script>
 </body>

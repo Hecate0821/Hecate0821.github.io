@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+  <meta name="viewport" content="width=1280">
+  <title>The Load-Balance Problem Behind Dynamic Context Parallelism</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">
+  <script>
+    (function(){
+      try {
+        var saved = localStorage.getItem('theme');
+        var prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+        var theme = saved || (prefersLight ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
+  <style>
+    :root, [data-theme="dark"] {
+      --bg: #161310;
+      --ink: #f4efe5;
+      --ink-dim: #bdb3a4;
+      --ink-faint: #746a5f;
+      --rule: #3a332c;
+      --accent: #6aa0ff;
+      --accent-soft: #2b3a5c;
+      --panel: rgba(255,255,255,0.018);
+      --code-bg: #211c18;
+    }
+    [data-theme="light"] {
+      --bg: #f7f0e4;
+      --ink: #1f1a15;
+      --ink-dim: #675f55;
+      --ink-faint: #9d9284;
+      --rule: #d8ccba;
+      --accent: #2a62d0;
+      --accent-soft: #b7c9e8;
+      --panel: rgba(255,255,255,0.18);
+      --code-bg: #eee4d6;
+    }
+    :root {
+      --font-blog: "Source Serif 4", Georgia, "Times New Roman", serif;
+      --fs-2xs: 12px;
+      --fs-xs: 13px;
+      --fs-sm: 15px;
+      --fs-md: 16px;
+      --fs-lg: 18px;
+      --fs-xl: 24px;
+      --fs-display: 64px;
+      --fs-section: 34px;
+      --fs-prose: 20px;
+      --lh-prose: 1.6;
+      --tracking-tight: -0.02em;
+      --tracking-ui: 0;
+    }
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      transition: background-color 2.2s cubic-bezier(0.33, 0, 0.2, 1),
+                  color 2.2s cubic-bezier(0.33, 0, 0.2, 1),
+                  border-color 2.2s cubic-bezier(0.33, 0, 0.2, 1),
+                  box-shadow 2.2s cubic-bezier(0.33, 0, 0.2, 1);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; }
+    }
+    html, body { background: var(--bg); color: var(--ink); }
+    body {
+      font-family: var(--font-blog);
+      font-size: var(--fs-md);
+      line-height: 1.6;
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      overflow-x: hidden;
+    }
+    a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-soft); }
+    a:hover { color: var(--accent); border-color: var(--accent); }
+    .page {
+      position: relative;
+      z-index: 1;
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 48px 88px;
+    }
+    .corner { display: none; }
+    .theme-toggle {
+      position: fixed;
+      top: 28px;
+      right: 32px;
+      z-index: 10;
+      appearance: none;
+      border: none;
+      border-bottom: 1px solid var(--accent-soft);
+      border-radius: 0;
+      background: transparent;
+      color: var(--ink-dim);
+      font-family: var(--font-blog);
+      font-size: var(--fs-sm);
+      line-height: 1.3;
+      cursor: pointer;
+      padding: 0;
+    }
+    .theme-toggle:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    .back-link {
+      display: inline-block;
+      margin-bottom: 72px;
+      color: var(--ink-dim);
+      border-bottom: none;
+      font-size: var(--fs-sm);
+    }
+    .back-link:hover { color: var(--accent); }
+    header.post-head {
+      padding: 0 0 72px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      margin-bottom: 24px;
+      font-size: var(--fs-xs);
+      letter-spacing: var(--tracking-ui);
+      text-transform: none;
+      color: var(--ink-dim);
+    }
+    .pill {
+      border: none;
+      border-radius: 0;
+      padding: 5px 10px;
+    }
+    h1 {
+      max-width: 860px;
+      font-weight: 700;
+      font-size: var(--fs-display);
+      line-height: 0.98;
+      letter-spacing: var(--tracking-tight);
+      color: var(--ink);
+      margin-bottom: 22px;
+    }
+    .subtitle {
+      max-width: 76ch;
+      font-size: var(--fs-prose);
+      line-height: var(--lh-prose);
+      letter-spacing: 0;
+      color: var(--ink-dim);
+    }
+    section {
+      padding: 56px 0 8px;
+    }
+    h2 {
+      font-size: var(--fs-section);
+      font-weight: 700;
+      line-height: 1.12;
+      letter-spacing: var(--tracking-tight);
+      text-transform: none;
+      color: var(--ink);
+      margin-bottom: 22px;
+    }
+    p {
+      max-width: 86ch;
+      font-size: var(--fs-prose);
+      line-height: var(--lh-prose);
+      letter-spacing: 0;
+      color: var(--ink);
+    }
+    section > p {
+      max-width: 74ch;
+    }
+    li {
+      font-size: var(--fs-prose);
+      line-height: var(--lh-prose);
+      letter-spacing: 0;
+    }
+    p + p { margin-top: 14px; }
+    code {
+      font-family: inherit;
+      padding: 0 1px;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      font-size: 0.97em;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .parallel-map {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0 22px;
+    }
+    .axis {
+      min-height: 126px;
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      padding: 12px;
+      background: var(--panel);
+    }
+    .axis strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--ink);
+      letter-spacing: var(--tracking-ui);
+      text-transform: none;
+    }
+    .axis span {
+      display: block;
+      color: var(--ink-dim);
+      font-size: var(--fs-sm);
+      line-height: 1.45;
+    }
+    .figure-image {
+      display: block;
+      width: 100%;
+      margin: 24px 0 10px;
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      background: #fff;
+    }
+    .figure-caption {
+      margin: 0 0 22px;
+      color: var(--ink-dim);
+      font-size: var(--fs-sm);
+      line-height: 1.45;
+    }
+    .refs p {
+      max-width: none;
+      padding: 9px 0;
+      border-top: none;
+      font-size: var(--fs-sm);
+    }
+    footer.foot {
+      margin-top: 56px;
+      padding-top: 24px;
+      border-top: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: var(--fs-2xs);
+      letter-spacing: var(--tracking-ui);
+      text-transform: none;
+      color: var(--ink-faint);
+    }
+    .page::before { display: none; }
+    @media (max-width: 900px) {
+      .parallel-map { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 720px) {
+      .page { padding: 40px 28px 72px; }
+      .parallel-map { grid-template-columns: 1fr; }
+      .figure-image { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+  <button class="theme-toggle" type="button" aria-label="Switch color theme">Light</button>
+
+  <a class="back-link" href="../../index.html">← Back</a>
+
+  <main>
+  <header class="post-head">
+    <div class="meta">
+      <span class="pill">systems note</span>
+      <span class="pill">post-training systems</span>
+      <span class="pill">DP+CP load balance</span>
+    </div>
+    <h1>The Load-Balance Problem Behind Dynamic Context Parallelism</h1>
+    <p class="subtitle">TL;DR: variable sequence length turns hybrid parallelism into a scheduling problem. Megatron Dynamic-CP improves a fixed DPxCP pool by choosing CP size per sequence inside a packed batch, while ByteScale's Hybrid Data Parallelism goes further by scheduling a more flexible rank pool. The main lesson is that DP, CP, and PP cannot be optimized independently once load balance and communication are both in the loop.</p>
+  </header>
+
+  <section>
+    <h2>1. The 5D Map Is Really a Coupling Map</h2>
+    <div class="parallel-map">
+      <div class="axis"><strong>DP</strong><span>Splits samples across ranks, then synchronizes gradients.</span></div>
+      <div class="axis"><strong>CP</strong><span>Splits one sequence across ranks, mainly to make long attention fit.</span></div>
+      <div class="axis"><strong>TP + SP</strong><span>Splits layer tensors and some sequence-dimension activations.</span></div>
+      <div class="axis"><strong>PP</strong><span>Splits layers into pipeline stages.</span></div>
+      <div class="axis"><strong>EP</strong><span>Splits experts and routes tokens to them.</span></div>
+    </div>
+    <p>The axes are not independent knobs. Optimizing one split changes both communication and load balance for the others: a CP split can make one long sample fit, but it can also add P2P traffic; a DP split can add sample throughput, but it can also leave ranks waiting at gradient synchronization; a PP split can turn uneven microbatch runtimes into pipeline bubbles.</p>
+    <p>This post focuses on the DP+CP part in Megatron Dynamic-CP and ByteScale.</p>
+  </section>
+
+  <section>
+    <h2>2. What Is Microbatch-Level DP Load Balancing?</h2>
+    <p>For this section and the rest of the post, assume sequence packing is already supported: a microbatch may contain multiple sequences, and the scheduler can see their token lengths rather than only one opaque tensor shape.</p>
+    <p>The naive way to handle post-training load balance is to ignore CP and only rearrange samples across DP ranks. A simple version sorts samples by token count, or by a cost function derived from token count, then uses a longest-processing-time heuristic: place the next heaviest sample or microbatch on the currently lightest DP rank. This often makes each gradient-accumulation window less skewed because the long samples are spread across ranks instead of clustered.</p>
+    <p>The constraint is that gradient accumulation still expects the DP ranks to meet at the same synchronization boundary. If rank 0 executes a different number of microbatches from rank 1 before the same gradient update, the forward/backward and communication schedule can diverge. So microbatch-level DP load balancing tries to make each microbatch step have comparable token work across ranks while keeping the same microbatch count per rank.</p>
+    <p>Slime implements a more practical two-level version for rollout training. Its <a href="https://github.com/THUDM/slime/blob/def718c711429f9873301252ed5daaf2fc96c91a/slime/utils/dp_schedule.py">DP/microbatch scheduler</a> first groups rollout samples into training steps, then packs each step into microbatches by fixed chunking or first-fit token packing. After that, if <code>--balance-data</code> is enabled, it balances the resulting microbatch token sums across DP ranks with the <a href="https://github.com/THUDM/slime/blob/def718c711429f9873301252ed5daaf2fc96c91a/slime/utils/seqlen_balancing.py">Karmarkar-Karp partitioner</a> while preserving the equal-count invariant. This is smarter than raw sample-level LPT because it balances the units the training loop actually executes, but it still treats CP as a fixed capacity factor rather than choosing a per-sequence <code>local_cp_size</code>.</p>
+  </section>
+
+  <section>
+    <h2>3. How Megatron Handles This</h2>
+    <p>Megatron's hybrid context parallelism is already a useful step away from a fixed "DP equals N, CP equals M" grid. At initialization it still builds a bounded set of process groups over the DPxCP ranks. At runtime, the scheduler first unpacks the packed batch: a sub-sample is one real sequence segment recovered from the packed tensor using its cumulative sequence lengths. The scheduler then assigns each sub-sample a <code>local_cp_size</code>: short sequences can stay on one rank, while long sequences may occupy 2, 4, 8, or more ranks from the same DPxCP pool.</p>
+    <img
+      class="figure-image"
+      src="bytescale-figure-3.png"
+      alt="ByteScale Figure 3 showing data and context parallelism, redundant communication, and imbalanced computation"
+      loading="lazy">
+    <p class="figure-caption">Figure 3 from the ByteScale paper, showing why fixed DP+CP can create redundant communication for short sequences and imbalance bubbles across DP/PP schedules.</p>
+    <p>The relevant Megatron code is compact enough to read directly: <a href="https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/parallel_state.py">parallel_state.py</a> creates the bounded hybrid DP-CP process groups, <a href="https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/datasets/data_schedule.py">data_schedule.py</a> unpacks and reroutes sub-samples, and <a href="https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/pipeline_parallel/hybrid_cp_schedule.py">hybrid_cp_schedule.py</a> estimates relative attention work as roughly <code>seq_len * seq_len / cp_size</code>, rounds the required CP size to a power of two, and inserts barriers between compatible groups. NVIDIA's <a href="https://developer.nvidia.com/blog/speeding-up-variable-length-training-with-dynamic-context-parallelism-and-nvidia-megatron-core/">Dynamic-CP blog</a> describes the same direction at the system level: a data-iterator wrapper reschedules packed data, selects CP size, returns the effective <code>num_micro_batches</code>, and broadcasts the dynamic packing metadata across pipeline stages.</p>
+    <p>The PP part is still at the microbatch scheduling level. Dynamic-CP does not add a separate PP parallelism layer; it tries to feed Megatron's existing PP/VPP schedule with better-balanced microbatches and consistent dynamic metadata, so fewer long microbatches block neighboring pipeline stages.</p>
+    <p>That corrects an easy overstatement: Megatron is not merely "fixed CP for every microbatch." Its hybrid CP path is dynamic over sub-samples inside the current DPxCP scheduling window. The narrower constraint is that the dynamic choice is represented through pre-created power-of-two CP groups, while the rest of the stack still has to preserve common loss scaling, gradient synchronization, and pipeline execution semantics.</p>
+  </section>
+
+  <section>
+    <h2>4. What ByteScale Adds Beyond Megatron Hybrid CP</h2>
+    <p>A caveat first: ByteScale does not appear to have an open-source training implementation, so this comparison is based on the paper's design description rather than code-level verification.</p>
+    <p>The most important difference is scheduling scope. Megatron Dynamic-CP already goes beyond a fixed microbatch shape: the NVIDIA blog says the effective <code>num_micro_batches</code> can vary by iteration, PP metadata is broadcast to keep pipeline stages consistent, and a solver can sweep microbatch counts. The remaining structure is still recognizably Megatron: all DP ranks are constrained to the same microbatch count in the runtime search, and CP choices come from pre-created power-of-two groups.</p>
+    <p>ByteScale relaxes that equal-microbatch-count assumption for Hybrid Data Parallel ranks. Its balance scheduler assigns more sequences to ranks or pipelines with shorter estimated execution time, while preserving equivalence through gradients accumulated over all tokens in the global batch. The paper separates this into DP-Balance and PP-Balance: DP-Balance targets per-time-step load balance across HDP ranks, while PP-Balance also orders length buckets so neighboring pipeline stages see more compatible microbatch runtimes. So the benefit is not only "less PP bubble"; it is a broader DP+CP load-balance scheduler with a PP-aware mode. That is also why it is hard to retrofit into a Megatron/FSDP-style stack: scheduler state, loss normalization, gradient sync boundaries, FSDP unshard/reshard timing, and PP scheduling all have to agree on the same per-iteration plan.</p>
+    <img
+      class="figure-image"
+      src="bytescale-figure-8.png"
+      alt="ByteScale Figure 8 illustrating Hybrid Data Parallelism"
+      loading="lazy">
+    <p class="figure-caption">Figure 8 from the ByteScale paper, illustrating the Hybrid Data Parallel view after replacing the fixed DP+CP grid.</p>
+    <p>The paper also claims a more flexible rank-assignment and communication model: a sequence may use any number of ranks in <code>[1, d_hdp]</code>, with P2P only among the ranks that participate in that sequence. I keep this compact because the training implementation is not open source; the paper also discusses selective activation offloading and PP bubble reduction, and is the better reference for those details.</p>
+  </section>
+
+  <section>
+    <h2>5. Final Thought</h2>
+    <p>Hybrid parallelism is not "the more axes, the better." The obvious limit is communication: every new split can add collectives, P2P traffic, metadata, and synchronization points. A parallel axis only helps if the memory or throughput it unlocks is worth that overhead.</p>
+    <p>The deeper issue is load balance. Adding a dimension blindly can make imbalance worse: short sequences may pay unnecessary CP communication, long sequences may strand DP neighbors, and uneven microbatches may become PP bubbles. Adding a dimension intelligently can do the opposite: it gives the scheduler another way to place work so ranks finish closer together.</p>
+    <p>So the useful mental model is not orthogonal DP, CP, and PP knobs. It is one per-iteration execution plan: which tokens go to which ranks, which ranks communicate, when gradients synchronize, and whether the plan preserves the same global-batch gradient meaning.</p>
+  </section>
+
+  <section class="refs">
+    <h2>References</h2>
+    <p><a href="https://arxiv.org/abs/2502.21231">ByteScale: Efficient Scaling of LLM Training with a 2048K Context Length on More Than 12000 GPUs</a></p>
+    <p><a href="https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/pipeline_parallel/hybrid_cp_schedule.py">Megatron-LM hybrid_cp_schedule.py</a></p>
+    <p><a href="https://github.com/pytorch/pytorch/blob/main/torch/distributed/fsdp/_fully_shard/_fully_shard.py">PyTorch FSDP fully_shard API</a></p>
+    <p><a href="https://developer.nvidia.com/blog/speeding-up-variable-length-training-with-dynamic-context-parallelism-and-nvidia-megatron-core/">NVIDIA Technical Blog: Speeding Up Variable-Length Training with Dynamic Context Parallelism and NVIDIA Megatron Core</a></p>
+  </section>
+  </main>
+
+  <footer class="foot">
+    <div><a href="../../index.html">Back to profile</a></div>
+    <div>Blog · Systems</div>
+  </footer>
+</div>
+<script>
+  (function(){
+    var button = document.querySelector('.theme-toggle');
+    if (!button) return;
+    function currentTheme() {
+      return document.documentElement.getAttribute('data-theme') || 'dark';
+    }
+    function render() {
+      button.textContent = currentTheme() === 'dark' ? 'Light' : 'Dark';
+    }
+    button.addEventListener('click', function(){
+      var next = currentTheme() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('theme', next); } catch (e) {}
+      render();
+    });
+    render();
+  })();
+</script>
+</body>
+</html>
