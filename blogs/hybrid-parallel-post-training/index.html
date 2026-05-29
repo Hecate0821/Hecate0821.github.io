@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
   <meta name="viewport" content="width=1280">
-  <title>The Load-Balance Problem Behind Dynamic Context Parallelism</title>
+  <title>The Load-Balance Problem Behind Hybrid Parallelism</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">
@@ -276,7 +276,7 @@
       <span class="pill">post-training systems</span>
       <span class="pill">DP+CP load balance</span>
     </div>
-    <h1>The Load-Balance Problem Behind Dynamic Context Parallelism</h1>
+    <h1>The Load-Balance Problem Behind Hybrid Parallelism</h1>
     <p class="subtitle">TL;DR: variable sequence length turns hybrid parallelism into a scheduling problem. Megatron Dynamic-CP improves a fixed DPxCP pool by choosing CP size per sequence inside a packed batch, while ByteScale's Hybrid Data Parallelism goes further by scheduling a more flexible rank pool. The main lesson is that DP, CP, and PP cannot be optimized independently once load balance and communication are both in the loop.</p>
   </header>
 
