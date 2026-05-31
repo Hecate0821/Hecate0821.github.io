@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>混合并行背后的负载均衡问题</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">
+  <script>
+    (function(){
+      try {
+        var saved = localStorage.getItem('theme');
+        var prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+        var theme = saved || (prefersLight ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
+  <style>
+    :root, [data-theme="dark"] {
+      --bg: #161310;
+      --ink: #f4efe5;
+      --ink-dim: #bdb3a4;
+      --ink-faint: #746a5f;
+      --rule: #3a332c;
+      --accent: #6aa0ff;
+      --accent-soft: #2b3a5c;
+      --panel: rgba(255,255,255,0.018);
+      --code-bg: #211c18;
+    }
+    [data-theme="light"] {
+      --bg: #f7f0e4;
+      --ink: #1f1a15;
+      --ink-dim: #675f55;
+      --ink-faint: #9d9284;
+      --rule: #d8ccba;
+      --accent: #2a62d0;
+      --accent-soft: #b7c9e8;
+      --panel: rgba(255,255,255,0.18);
+      --code-bg: #eee4d6;
+    }
+    :root {
+      --font-blog: "Source Serif 4", Georgia, "Times New Roman", "Noto Serif CJK SC", "Songti SC", serif;
+      --content-width: 820px;
+      --wide-width: 1084px;
+      --fs-2xs: 12px;
+      --fs-xs: 13px;
+      --fs-sm: 15px;
+      --fs-md: 16px;
+      --fs-lg: 18px;
+      --fs-xl: 24px;
+      --fs-display: 58px;
+      --fs-section: 32px;
+      --fs-prose: 20px;
+      --lh-prose: 1.75;
+      --tracking-tight: 0;
+      --tracking-ui: 0;
+    }
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      transition: background-color 2.2s cubic-bezier(0.33, 0, 0.2, 1),
+                  color 2.2s cubic-bezier(0.33, 0, 0.2, 1),
+                  border-color 2.2s cubic-bezier(0.33, 0, 0.2, 1),
+                  box-shadow 2.2s cubic-bezier(0.33, 0, 0.2, 1);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; }
+    }
+    html, body { background: var(--bg); color: var(--ink); }
+    body {
+      font-family: var(--font-blog);
+      font-size: var(--fs-md);
+      line-height: 1.6;
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      overflow-x: hidden;
+    }
+    a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-soft); }
+    a:hover { color: var(--accent); border-color: var(--accent); }
+    .page {
+      position: relative;
+      z-index: 1;
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 48px 88px;
+    }
+    .corner { display: none; }
+    .theme-toggle {
+      position: fixed;
+      top: 28px;
+      right: 32px;
+      z-index: 10;
+      appearance: none;
+      border: none;
+      border-bottom: 1px solid var(--accent-soft);
+      border-radius: 0;
+      background: transparent;
+      color: var(--ink-dim);
+      font-family: var(--font-blog);
+      font-size: var(--fs-sm);
+      line-height: 1.3;
+      cursor: pointer;
+      padding: 0;
+    }
+    .theme-toggle:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+    .back-link {
+      color: var(--ink-dim);
+      border-bottom: none;
+      font-size: var(--fs-sm);
+    }
+    .back-link:hover { color: var(--accent); }
+    .top-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 24px;
+      width: min(var(--content-width), 100%);
+      margin: 0 auto 72px;
+      font-size: var(--fs-sm);
+    }
+    .language-switch {
+      display: flex;
+      gap: 10px;
+      color: var(--ink-dim);
+    }
+    .language-switch a,
+    .language-switch span {
+      border-bottom: none;
+    }
+    .language-switch .active {
+      color: var(--ink);
+    }
+    .translation-note {
+      max-width: var(--content-width);
+      margin: -48px auto 56px;
+      color: var(--ink-dim);
+      border-bottom: none;
+      font-size: var(--fs-sm);
+      line-height: 1.45;
+    }
+    header.post-head {
+      max-width: var(--content-width);
+      margin: 0 auto;
+      padding: 0 0 72px;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+      margin-bottom: 24px;
+      font-size: var(--fs-xs);
+      letter-spacing: var(--tracking-ui);
+      text-transform: none;
+      color: var(--ink-dim);
+    }
+    .pill {
+      border: none;
+      border-radius: 0;
+      padding: 5px 10px;
+    }
+    h1 {
+      max-width: var(--content-width);
+      font-weight: 700;
+      font-size: var(--fs-display);
+      line-height: 1.08;
+      letter-spacing: var(--tracking-tight);
+      color: var(--ink);
+      margin-bottom: 22px;
+    }
+    .subtitle {
+      max-width: none;
+      font-size: var(--fs-prose);
+      line-height: var(--lh-prose);
+      letter-spacing: 0;
+      color: var(--ink-dim);
+    }
+    section {
+      max-width: var(--content-width);
+      margin: 0 auto;
+      padding: 56px 0 8px;
+    }
+    h2 {
+      font-size: var(--fs-section);
+      font-weight: 700;
+      line-height: 1.2;
+      letter-spacing: var(--tracking-tight);
+      text-transform: none;
+      color: var(--ink);
+      margin-bottom: 22px;
+    }
+    p {
+      max-width: none;
+      font-size: var(--fs-prose);
+      line-height: var(--lh-prose);
+      letter-spacing: 0;
+      color: var(--ink);
+    }
+    section > p {
+      max-width: none;
+    }
+    li {
+      font-size: var(--fs-prose);
+      line-height: var(--lh-prose);
+      letter-spacing: 0;
+    }
+    p + p { margin-top: 14px; }
+    code {
+      font-family: inherit;
+      padding: 0 1px;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      font-size: 0.97em;
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .parallel-map {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      width: min(var(--wide-width), calc(100vw - 96px));
+      margin: 18px 0 22px 50%;
+      transform: translateX(-50%);
+    }
+    .axis {
+      min-height: 126px;
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      padding: 12px;
+      background: var(--panel);
+    }
+    .axis strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--ink);
+      letter-spacing: var(--tracking-ui);
+      text-transform: none;
+    }
+    .axis span {
+      display: block;
+      color: var(--ink-dim);
+      font-size: var(--fs-sm);
+      line-height: 1.55;
+    }
+    .figure-image {
+      display: block;
+      width: min(var(--wide-width), calc(100vw - 96px));
+      max-width: none;
+      margin: 24px 0 10px 50%;
+      transform: translateX(-50%);
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      background: #fff;
+    }
+    .figure-caption {
+      margin: 0 0 22px;
+      color: var(--ink-dim);
+      font-size: var(--fs-sm);
+      line-height: 1.55;
+    }
+    .refs p {
+      max-width: none;
+      padding: 9px 0;
+      border-top: none;
+      font-size: var(--fs-sm);
+    }
+    footer.foot {
+      max-width: var(--content-width);
+      margin: 56px auto 0;
+      padding-top: 24px;
+      border-top: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: var(--fs-2xs);
+      letter-spacing: var(--tracking-ui);
+      text-transform: none;
+      color: var(--ink-faint);
+    }
+    .page::before { display: none; }
+    @media (max-width: 900px) {
+      .parallel-map { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 720px) {
+      :root {
+        --fs-display: 38px;
+        --fs-section: 26px;
+        --fs-prose: 18px;
+      }
+      .page { padding: 32px 22px 64px; }
+      .top-nav {
+        margin-bottom: 48px;
+      }
+      .translation-note {
+        margin: -28px auto 40px;
+      }
+      header.post-head { padding: 0 0 48px; }
+      section { padding: 40px 0 8px; }
+      .parallel-map {
+        grid-template-columns: 1fr;
+        width: 100%;
+        margin: 18px 0 22px;
+        transform: none;
+      }
+      .figure-image {
+        width: 100%;
+        margin: 24px 0 10px;
+        transform: none;
+      }
+      .theme-toggle { top: 16px; right: 16px; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+  <button class="theme-toggle" type="button" aria-label="切换颜色主题">浅色</button>
+
+  <nav class="top-nav" aria-label="文章导航">
+    <a class="back-link" href="../../../index.html">← 返回</a>
+    <div class="language-switch" aria-label="语言切换">
+      <a href="../">EN</a>
+      <span>/</span>
+      <span class="active">ZH</span>
+    </div>
+  </nav>
+  <p class="translation-note">注：中文版本由 AI 生成，可能与英文原文存在轻微差异。</p>
+
+  <main>
+  <header class="post-head">
+    <div class="meta">
+      <span class="pill">系统笔记</span>
+      <span class="pill">后训练系统</span>
+      <span class="pill">DP+CP 负载均衡</span>
+    </div>
+    <h1>混合并行背后的负载均衡问题</h1>
+    <p class="subtitle">最近看长上下文训练和 post-training 系统时，一个很容易被低估的问题是：并行维度加上去以后，系统不一定更快，甚至可能更慢。原因也很直接，可变长度样本会把“怎么切模型、怎么切序列”变成“这一轮到底让哪些 rank 干哪些活”的调度问题。本文尝试把 Megatron Dynamic-CP 和 ByteScale 放在一起看，重点不是复述并行名词，而是看它们分别怎样处理 DP+CP 的负载均衡。</p>
+  </header>
+
+  <section>
+    <h2>1. 问题从哪里来</h2>
+    <div class="parallel-map">
+      <div class="axis"><strong>DP</strong><span>把样本分到不同 rank 上，最后同步梯度。</span></div>
+      <div class="axis"><strong>CP</strong><span>把一条长序列切到多个 rank 上，主要解决 attention 显存问题。</span></div>
+      <div class="axis"><strong>TP + SP</strong><span>切分层内张量，以及一部分序列维 activation。</span></div>
+      <div class="axis"><strong>PP</strong><span>把网络层切分成 pipeline stage。</span></div>
+      <div class="axis"><strong>EP</strong><span>切分 expert，并把 token 路由到对应 expert。</span></div>
+    </div>
+    <p>如果只看概念，DP、CP、TP、PP、EP 都很清楚。但真正把它们放到一个训练系统里，麻烦就来了：这些维度不是互相独立的。CP 能让长序列的 attention 放进显存，但会带来 P2P 通信；DP 能增加样本并行度，但所有 rank 最后还是要在梯度同步处碰头；PP 能切层，但 microbatch 时间不均匀时就会产生 bubble。</p>
+    <p>更麻烦的是 post-training 里的序列长度经常很不均匀。一批数据里可能既有很短的 prompt，也有很长的 reasoning trace。如果仍然把每个 microbatch 当成差不多的计算量，那么调度器看到的是整齐的张量，硬件看到的却是很不均匀的工作。</p>
+    <p>所以本文只讨论一个窄问题：在可变长度训练中，DP+CP 的负载均衡应该怎么理解？Megatron Dynamic-CP 解决了哪一层问题？ByteScale 又把问题放大到了什么范围？</p>
+  </section>
+
+  <section>
+    <h2>2. 先看最朴素的 DP balance</h2>
+    <p>为了让问题简单一点，先假设系统已经支持 sequence packing。也就是说，一个 microbatch 里可以塞多条真实序列，调度器至少知道每条序列有多长，而不是只看到一个已经 pad 或 pack 之后的 tensor。</p>
+    <p>这时候最容易想到的办法，是先不动 CP，只在 DP rank 之间重新分配样本。比如按 token 数排序，或者按 token 数估一个计算 cost，然后用 longest-processing-time 这类启发式：每次把当前最重的样本或 microbatch 放到当前最空的 rank 上。这个思路很朴素，但也很有效，至少能避免长样本全堆到同一个 rank，导致别的 rank 在同步点空等。</p>
+    <p>不过这里有一个关键限制：DP 不是普通的任务队列。一次 gradient accumulation 结束时，所有 DP rank 要对齐到同一个梯度同步边界。如果一个 rank 跑了 8 个 microbatch，另一个 rank 跑了 7 个，那么 forward/backward、loss scaling、通信顺序都要重新定义。于是很多 DP balance 的实现，实际上是在一个更窄的空间里做平衡：每个 rank 的 microbatch 数量仍然相同，只是尽量让每一步的 token work 接近。</p>
+    <p>Slime 的实现就是一个比较典型的工程版本。它的 <a href="https://github.com/THUDM/slime/blob/def718c711429f9873301252ed5daaf2fc96c91a/slime/utils/dp_schedule.py">DP/microbatch scheduler</a> 先把 rollout 样本组织成 training step，再用固定 chunking 或 first-fit token packing 生成 microbatch。之后如果打开 <code>--balance-data</code>，它会用 <a href="https://github.com/THUDM/slime/blob/def718c711429f9873301252ed5daaf2fc96c91a/slime/utils/seqlen_balancing.py">Karmarkar-Karp partitioner</a> 在 DP rank 之间平衡 microbatch token sum，同时保留每个 rank 的 microbatch 数量一致。换句话说，它 balance 的不是抽象样本，而是训练循环真正会执行的 microbatch。</p>
+    <p>但这个方案里，CP 仍然更像一个固定容量因子。它可以帮助系统容纳更长序列，但还没有让每条序列自己决定要占几个 CP rank。这就是 Megatron Dynamic-CP 往前推进的地方。</p>
+  </section>
+
+  <section>
+    <h2>3. Megatron：在固定池子里做动态 CP</h2>
+    <p>Megatron 的 hybrid context parallelism 不是简单地把 CP 固定成一个全局值。它在初始化时仍然会基于 DPxCP rank 预建一组 process group，但运行时会先把 packed batch 解开，根据 cumulative sequence length 还原出一段段真实序列，也就是代码里的 sub-sample。然后，调度器会给每个 sub-sample 分配 <code>local_cp_size</code>：短序列可能只用 1 个 rank，长序列可能用同一个 DPxCP 池里的 2、4、8 个甚至更多 rank。</p>
+    <img
+      class="figure-image"
+      src="../bytescale-figure-3.png"
+      alt="ByteScale 图 3，展示 data parallelism、context parallelism、冗余通信和计算不均衡"
+      loading="lazy">
+    <p class="figure-caption">ByteScale 论文图 3 解释了固定 DP+CP 的一个典型问题：短序列可能承担不必要的 CP 通信，长短不均又会在 DP/PP 调度里形成 bubble。</p>
+    <p>从代码上看，相关路径比较集中：<a href="https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/parallel_state.py">parallel_state.py</a> 负责创建 hybrid DP-CP process group，<a href="https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/datasets/data_schedule.py">data_schedule.py</a> 负责解包和重路由 sub-sample，<a href="https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/pipeline_parallel/hybrid_cp_schedule.py">hybrid_cp_schedule.py</a> 会用近似的 <code>seq_len * seq_len / cp_size</code> 来估算 attention work，再把 CP size 向上取整到 2 的幂，并在兼容 group 之间插入 barrier。NVIDIA 的 <a href="https://developer.nvidia.com/blog/speeding-up-variable-length-training-with-dynamic-context-parallelism-and-nvidia-megatron-core/">Dynamic-CP 技术博客</a> 也描述了同一套系统语义：data iterator wrapper 重新调度 packed data，选择 CP size，返回有效的 <code>num_micro_batches</code>，并把动态 packing 元数据广播到各个 pipeline stage。</p>
+    <p>这里容易误解的一点是，Dynamic-CP 并不是重新设计了一套 pipeline parallelism。PP 仍然走 Megatron 原来的 PP/VPP schedule；Dynamic-CP 的作用，是尽量把送进 PP 的 microbatch 做得更均衡，并保证各个 stage 拿到一致的动态元数据。这样可以减少某些长 microbatch 对相邻 stage 的阻塞，但 pipeline 语义本身并没有被替换。</p>
+    <p>所以总结一下，Megatron 的关键变化不是“支持 CP”本身，而是让 CP 在一个预建好的 DPxCP group 池子里变成了 per-sub-sample 的选择。限制也同样明确：可选 group 主要是 2 的幂；调度还要服从 Megatron 原有的 loss scaling、梯度同步和 pipeline 执行边界。</p>
+  </section>
+
+  <section>
+    <h2>4. ByteScale：把 rank 分配也纳入调度</h2>
+    <p>ByteScale 这里要先说明一个限制：我没有看到开源训练实现，所以这部分只能基于论文中的设计描述来比较，不能算代码级验证。</p>
+    <p>它和 Megatron Dynamic-CP 最核心的区别，是调度范围更大。Megatron 已经允许有效的 <code>num_micro_batches</code> 随 iteration 变化，也会广播 PP 元数据来保证 pipeline stage 一致；但在运行时搜索里，DP rank 仍然基本要保持相同 microbatch count，CP choice 也来自预先建好的 2 的幂 group。</p>
+    <p>ByteScale 的 Hybrid Data Parallelism 则进一步放松了这个约束。它的 balance scheduler 会把更多序列分给估计执行时间更短的 rank 或 pipeline，再通过全局 batch 内所有 token 上累计的梯度来保持训练语义。论文里把这件事拆成 DP-Balance 和 PP-Balance：前者处理 HDP rank 之间每个 time step 的负载均衡，后者还会调整 length bucket 的顺序，让相邻 pipeline stage 的 microbatch runtime 更接近。</p>
+    <p>这也是为什么我认为 ByteScale 不是简单做了一个“减少 PP bubble”的小优化。它更像是在重新定义一次 iteration 的执行计划：序列怎么分配，rank 怎么参与，哪些 rank 需要通信，梯度如何累计，pipeline 如何排队。收益来自更大的调度自由度，代价也是同一件事：scheduler state、loss normalization、gradient sync boundary、FSDP unshard/reshard timing 和 PP scheduling 都要理解同一个计划。</p>
+    <img
+      class="figure-image"
+      src="../bytescale-figure-8.png"
+      alt="ByteScale 图 8，展示 Hybrid Data Parallelism"
+      loading="lazy">
+    <p class="figure-caption">ByteScale 论文图 8 展示的是另一种视角：不再把 DP+CP 看成固定网格，而是看成一个可以为不同序列分配不同 rank 数的 HDP 池。</p>
+    <p>论文还描述了更灵活的 rank assignment：一条序列可以使用 <code>[1, d_hdp]</code> 内任意数量的 rank，P2P 通信只发生在参与这条序列的 rank 之间。至于 selective activation offloading 和 PP bubble reduction，论文里还有更多细节；这里为了避免过度展开，只把它们作为 ByteScale 调度范围更大的旁证。</p>
+  </section>
+
+  <section>
+    <h2>5. 小结</h2>
+    <p>混合并行最容易给人一种错觉：维度越多，系统越强。但从负载均衡角度看，事情刚好没有这么简单。每多一个切分维度，都可能带来新的 collective、P2P、元数据和同步点。如果这些额外成本没有换来足够的显存空间或吞吐提升，那这个维度就只是把系统变复杂了。</p>
+    <p>反过来，如果调度器真的理解这些维度之间的耦合关系，多一个维度也可能是好事。短序列可以少用 CP，长序列可以多用 CP；空闲 rank 可以多接一点序列；pipeline stage 可以看到更接近的 microbatch runtime。关键不在于“有没有这个并行轴”，而在于这个轴是否进入了同一个调度问题。</p>
+    <p>因此，我更倾向于把 DP、CP、PP 理解成一次 iteration execution plan 里的几个字段，而不是几组互相正交的配置项。真正需要回答的是：哪些 token 去哪些 rank，哪些 rank 之间通信，什么时候同步梯度，以及这个计划是否仍然对应同一个 global-batch gradient 语义。Megatron Dynamic-CP 和 ByteScale 的差别，本质上就是这张计划表覆盖范围的差别。</p>
+  </section>
+
+  <section class="refs">
+    <h2>参考资料</h2>
+    <p><a href="https://arxiv.org/abs/2502.21231">ByteScale: Efficient Scaling of LLM Training with a 2048K Context Length on More Than 12000 GPUs</a></p>
+    <p><a href="https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/pipeline_parallel/hybrid_cp_schedule.py">Megatron-LM hybrid_cp_schedule.py</a></p>
+    <p><a href="https://github.com/pytorch/pytorch/blob/main/torch/distributed/fsdp/_fully_shard/_fully_shard.py">PyTorch FSDP fully_shard API</a></p>
+    <p><a href="https://developer.nvidia.com/blog/speeding-up-variable-length-training-with-dynamic-context-parallelism-and-nvidia-megatron-core/">NVIDIA Technical Blog: Speeding Up Variable-Length Training with Dynamic Context Parallelism and NVIDIA Megatron Core</a></p>
+  </section>
+  </main>
+
+  <footer class="foot">
+    <div><a href="../../../index.html">返回主页</a></div>
+    <div>Blog · Systems</div>
+  </footer>
+</div>
+<script>
+  (function(){
+    var button = document.querySelector('.theme-toggle');
+    if (!button) return;
+    function currentTheme() {
+      return document.documentElement.getAttribute('data-theme') || 'dark';
+    }
+    function render() {
+      button.textContent = currentTheme() === 'dark' ? '浅色' : '深色';
+    }
+    button.addEventListener('click', function(){
+      var next = currentTheme() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('theme', next); } catch (e) {}
+      render();
+    });
+    render();
+  })();
+</script>
+</body>
+</html>

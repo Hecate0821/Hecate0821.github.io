@@ -113,14 +113,40 @@
       border-color: var(--accent);
     }
     .back-link {
-      display: block;
-      width: min(var(--content-width), 100%);
-      margin: 0 auto 72px;
       color: var(--ink-dim);
       border-bottom: none;
       font-size: var(--fs-sm);
     }
     .back-link:hover { color: var(--accent); }
+    .top-nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 24px;
+      width: min(var(--content-width), 100%);
+      margin: 0 auto 72px;
+      font-size: var(--fs-sm);
+    }
+    .language-switch {
+      display: flex;
+      gap: 10px;
+      color: var(--ink-dim);
+    }
+    .language-switch a,
+    .language-switch span {
+      border-bottom: none;
+    }
+    .language-switch .active {
+      color: var(--ink);
+    }
+    .translation-note {
+      max-width: var(--content-width);
+      margin: -48px auto 56px;
+      color: var(--ink-dim);
+      border-bottom: none;
+      font-size: var(--fs-sm);
+      line-height: 1.45;
+    }
     header.post-head {
       max-width: var(--content-width);
       margin: 0 auto;
@@ -271,7 +297,12 @@
         --fs-prose: 18px;
       }
       .page { padding: 32px 22px 64px; }
-      .back-link { margin-bottom: 48px; }
+      .top-nav {
+        margin-bottom: 48px;
+      }
+      .translation-note {
+        margin: -28px auto 40px;
+      }
       header.post-head { padding: 0 0 48px; }
       section { padding: 40px 0 8px; }
       .parallel-map {
@@ -297,7 +328,15 @@
   <div class="corner br"></div>
   <button class="theme-toggle" type="button" aria-label="Switch color theme">Light</button>
 
-  <a class="back-link" href="../../index.html">← Back</a>
+  <nav class="top-nav" aria-label="Post navigation">
+    <a class="back-link" href="../../index.html">← Back</a>
+    <div class="language-switch" aria-label="Language switch">
+      <span class="active">EN</span>
+      <span>/</span>
+      <a href="zh/">ZH</a>
+    </div>
+  </nav>
+  <p class="translation-note">Note: the Chinese version is AI-generated and may differ slightly from the English original.</p>
 
   <main>
   <header class="post-head">
