@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="A technical slide deck on Token-In / Token-Out for agentic reinforcement learning." />
+    <title>TITO Gateway — exact trajectories for agentic RL</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&amp;display=swap" rel="stylesheet" />
+    <script>
+      (function(){
+        try {
+          var saved = localStorage.getItem('theme');
+          var prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+          document.documentElement.setAttribute('data-theme', saved || (prefersLight ? 'light' : 'dark'));
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="viewport">
+      <main class="deck" aria-live="polite">
+        <section class="slide slide-title is-active" data-title="Agentic RL" aria-hidden="false">
+          <div class="ambient ambient-a"></div>
+          <div class="ambient ambient-b"></div>
+          <p class="eyebrow">AGENTIC RL</p>
+          <div class="title-lockup">
+            <h1>Agentic RL needs<br /><span>exact token trajectories.</span></h1>
+            <p class="lede">Token-In / Token-Out resolves the correctness boundary for long-horizon agent RL.</p>
+            <p class="cover-presenter"><strong>Presented by Chengxi Li</strong><span>Fireworks Training Infrastructure</span></p>
+          </div>
+          <div class="token-river" aria-label="Exact token trajectory">
+            <span>151644</span><span>894</span><span>198</span><span>7452</span><span class="action">220</span><span class="action">17</span><span class="action">991</span><span>198</span><span>151645</span>
+          </div>
+          <p class="corner-thesis">Readable text is a view.<br />Sampled tokens are evidence.</p>
+        </section>
+
+        <section class="slide slide-light" data-title="Agentic RL in post-training" aria-hidden="true">
+          <p class="eyebrow">0 · AGENTIC RL IN POST-TRAINING</p>
+          <h2>Agentic RL trains the model through complete interactions</h2>
+
+          <div class="agentic-rl-sequence" aria-label="Agentic reinforcement learning loop">
+            <article>
+              <span>01 · ACT</span>
+              <h3>Policy samples an action</h3>
+              <p>The model produces assistant text or a tool call from the current prompt.</p>
+            </article>
+            <article>
+              <span>02 · INTERACT</span>
+              <h3>Environment responds</h3>
+              <p>The agent harness executes tools and returns observations from the real task.</p>
+            </article>
+            <article>
+              <span>03 · CONTINUE</span>
+              <h3>The loop spans turns</h3>
+              <p>Each next action conditions on the interaction accumulated so far.</p>
+            </article>
+            <article>
+              <span>04 · LEARN</span>
+              <h3>Compare rewards, then learn</h3>
+              <p>Within each prompt group, better rollouts become more likely.</p>
+            </article>
+          </div>
+
+          <div class="agentic-rl-loss" aria-label="Simplified GRPO-style token-level policy loss">
+            <div>
+              <span>GRPO-STYLE POLICY LOSS · SIMPLIFIED</span>
+              <code>−∑<sub>i</sub> ∑<sub>t</sub> Â<sub>i</sub> log p<sub>θ</sub>(a<sub>i,t</sub> | prefix<sub>i,t</sub>)</code>
+            </div>
+            <p><strong>Sample a group of rollouts for one prompt.</strong> Their relative rewards form Â<sub>i</sub>; it weights each sampled action token’s log-probability. Prompt and tool-observation tokens are masked.</p>
+          </div>
+        </section>
+
+        <section class="slide slide-title" data-title="Why messages?" aria-hidden="true">
+          <p class="eyebrow">1 · REAL AGENT HARNESSES</p>
+          <div class="harness-title-lockup">
+            <h1>Why exact tokens still have to become a message</h1>
+            <p class="lede">OpenCode and Pi drive their agent loops from Chat Completions responses—not from raw token IDs.</p>
+          </div>
+
+          <div class="token-message-bridge" aria-label="Conversion from policy tokens to the message consumed by an agent harness">
+            <article>
+              <span>Policy sampler</span>
+              <h3>Exact action record</h3>
+              <div class="bridge-fields">
+                <code>token_ids&nbsp;&nbsp;[151644, 894, 198, …]</code>
+                <code>logprobs&nbsp;&nbsp;[-0.02, -0.14, -0.01, …]</code>
+              </div>
+              <p>These are the policy actions and aligned probabilities used for training.</p>
+            </article>
+            <div class="bridge-conversion">
+              <strong>decode + parse</strong>
+              <span>plain text</span>
+              <span>tool calls</span>
+              <span>finish / malformed status</span>
+            </div>
+            <article>
+              <span>Chat Completions response</span>
+              <h3>Assistant message</h3>
+              <div class="bridge-fields">
+                <code>assistant.content</code>
+                <code>assistant.tool_calls[]</code>
+                <code>finish_reason</code>
+              </div>
+              <p>OpenCode or Pi displays text, dispatches tools, appends results, and issues the next request.</p>
+            </article>
+          </div>
+
+          <p class="slide-claim">Decode/parse is required for agent compatibility. Exact tokens—not the parsed message—remain the training checkpoint.</p>
+        </section>
+
+        <section class="slide slide-light" data-title="Historical replay drift" aria-hidden="true">
+          <p class="eyebrow">2 · FAILURE 1/3 · HISTORICAL REPLAY</p>
+          <h2>Decode → encode preserves text—not token identity</h2>
+          <p class="standfirst">Qwen3.5-397B-A17B provides an existence proof: this valid sequence decodes to “The agent called the tool successfully,” but a later full-history render can encode that same text as a different action.</p>
+
+          <div class="asymmetry">
+            <div class="asymmetry-good">
+              <p class="direction">QWEN3.5 TOKENIZER · VALID POLICY SEQUENCE</p>
+              <div class="token-sample"><span>The</span><span>agent</span><span>called</span><span>the</span><span>tool</span><span class="token-mismatch">success</span><span class="token-mismatch">fully</span><span>.</span></div>
+              <strong>Two valid action IDs: 2316 + 3518</strong>
+              <p>The two tokens decode to “ successfully” inside the sentence.</p>
+            </div>
+            <div class="asymmetry-bad">
+              <p class="direction">SAME TEXT · RE-ENCODED</p>
+              <div class="token-sample muted"><span>The</span><span>agent</span><span>called</span><span>the</span><span>tool</span><span class="token-mismatch">successfully</span><span>.</span></div>
+              <strong>Re-encoding replaces them with ID 7544</strong>
+              <p>The sentence is unchanged; the action length and aligned logprobs change.</p>
+            </div>
+          </div>
+
+          <div class="conditional">
+            <p><strong>Per-turn capture is mandatory</strong></p>
+            <p>Retain the exact prompt IDs, sampled IDs, and aligned rollout logprobs at inference. A message-only replay cannot recover this evidence later.</p>
+            <div class="conditional-rule"></div>
+            <p><strong>Best-effort repair—not a guarantee</strong></p>
+            <p>Reuse the accepted exact prefix, or replace a bounded mismatch inside the latest replayed response as mask-0. If neither is safe, diverge.</p>
+          </div>
+        </section>
+
+        <section class="slide slide-light" data-title="Format and junction drift" aria-hidden="true">
+          <p class="eyebrow">3 · FAILURE 2/3 · FORMAT + JUNCTION</p>
+          <h2>Equivalent meaning can drift at two different owners</h2>
+          <p class="standfirst">A harness can rewrite message bytes; a tokenizer and chat template can change the exact turn junction. Neither requires a semantic change.</p>
+
+          <div class="text-boundary-compare" aria-label="Examples of format and junction drift">
+            <article>
+              <span>Harness / renderer · observed replay</span>
+              <h3>Tool JSON is serialized again</h3>
+              <p class="boundary-chain"><code>{ "command" : "printf synthetic-harness-turn" }</code></p>
+              <p class="boundary-chain"><code>{"command":"printf synthetic-harness-turn"}</code></p>
+              <p>In synthetic turns through pinned OpenCode and Pi CLIs, both replayed the compact form. The tool input stayed equivalent; the bytes did not.</p>
+            </article>
+            <article>
+              <span>Model format · tokenizer + template</span>
+              <h3>The turn junction requires a certified edit</h3>
+              <p class="boundary-chain"><code>&lt;|im_end|&gt;</code> + <code>&lt;|im_start|&gt;tool</code></p>
+              <p class="boundary-chain"><code>&lt;|im_end|&gt;\n&lt;|im_start|&gt;tool</code></p>
+              <p>The renderer must implement the model’s tokenizer and chat-template contract. Blind concatenation can miss a required newline or overlap.</p>
+            </article>
+          </div>
+
+          <p class="slide-claim">Repair by owner: normalize only proven harness equivalences, and apply only certified model-format edits. If either mapping is unsupported or ambiguous, diverge or reject.</p>
+        </section>
+
+        <section class="slide" data-title="Genuine history change" aria-hidden="true">
+          <p class="eyebrow">4 · <span>FAILURE</span> 3/3 · HISTORY CHANGE</p>
+          <h2>A compacted history is a different lineage</h2>
+          <p class="standfirst">Sometimes the harness intentionally changes what the model will see next. This is not tokenization noise and must not be normalized away.</p>
+
+          <div class="gateway-placement" aria-label="Example of a genuine history change caused by compaction">
+            <article>
+              <span>Stored exact lineage</span>
+              <h3>What earlier actions actually saw</h3>
+              <p><code>user task → assistant tool call → tool result → assistant action</code></p>
+              <strong>Exact prompt, action IDs, and logprobs remain valid evidence.</strong>
+            </article>
+            <article>
+              <span>Next harness request</span>
+              <h3>Earlier turns become a summary</h3>
+              <p><code>system summary: “Inspected the repo; tests fail in auth.”</code></p>
+              <strong>Compaction, pruning, rollback, or subagent handoff can create this change.</strong>
+            </article>
+            <article>
+              <span>Safe response</span>
+              <h3>Record a new exact branch or segment</h3>
+              <p>No bounded token edit can make the summary equal the earlier history without claiming a prompt the model never saw.</p>
+              <strong>Continue from the complete new prompt; keep prior exact evidence separately.</strong>
+            </article>
+          </div>
+
+          <p class="slide-claim">This is a real divergence. Splitting records the change; it does not repair or hide it.</p>
+        </section>
+
+        <section class="slide slide-light prompt-constructions" data-title="Two TITO modes" aria-hidden="true">
+          <p class="eyebrow">5 · TWO TITO MODES</p>
+          <h2>The real choice is who constructs the next prompt</h2>
+          <p class="standfirst">Both capture exact tokens for every inference call. Full-history TITO verifies the prompt the harness used; incremental TITO constructs the next prompt online.</p>
+
+          <div class="text-boundary-compare" aria-label="Comparison of full-history and incremental exact-prefix prompt construction">
+            <article>
+              <span>Full history · replay preserving</span>
+              <h3>Keep online inference unchanged</h3>
+              <p class="boundary-chain"><code>P<sub>N</sub> = full_render(M<sub>N</sub>)</code></p>
+              <p>The harness chooses the prompt used for inference. With exact per-call token IDs and logprobs, continuity can be checked after the rollout.</p>
+              <p class="boundary-outcome"><strong>Check / fallback</strong><br />Full-render the messages, compare with the prior exact record, and try bounded realignment. If alignment is unsafe, split.</p>
+            </article>
+            <article>
+              <span>Incremental exact prefix · online</span>
+              <h3>Build the next prompt from exact history</h3>
+              <p class="boundary-chain"><code>P<sub>N</sub> = join(C<sub>N−1</sub>, render_suffix(ΔM<sub>N</sub>))</code></p>
+              <p>The sidecar reuses the previous exact checkpoint and renders only new messages. It can change the prompt from the harness's full replay.</p>
+              <p class="boundary-outcome"><strong>Check / fallback</strong><br />Certify the model-specific suffix and token junction. If the join is unsupported or history changed, split before sampling or reject.</p>
+            </article>
+          </div>
+
+          <p class="slide-claim">Full history is broader and offline-capable. Incremental can avoid replay-only divergence, but every model/template junction needs explicit verification.</p>
+        </section>
+
+        <section class="slide" data-title="Why splitting works" aria-hidden="true">
+          <p class="eyebrow">6 · SAFE DIVERGENCE</p>
+          <h2>Exact prompts make divergence safe</h2>
+          <p class="standfirst">If continuity breaks entering turn N, keep every trainable action beside the exact prompt from which the rollout model sampled it.</p>
+
+          <div class="continuity-checks" aria-label="Two exact RL segments created at a token-continuity break">
+            <article>
+              <span>Segment 1 · exact prefix before the break</span>
+              <h3>Earlier actions remain trainable</h3>
+              <p class="continuity-equation"><code>P<sub>K</sub> … observations</code><i>+</i><code>A<sub>K</sub> … A<sub>N−1</sub></code></p>
+              <p>Prompt and observation tokens are mask-0. Every retained sampled assistant action is mask-1 and receives the rollout advantage.</p>
+              <strong>Close the segment at the last exact action.</strong>
+            </article>
+            <article>
+              <span>Segment 2 · exact prompt after the break</span>
+              <h3>Turn N starts from what inference actually saw</h3>
+              <p class="continuity-equation"><code>P<sub>N</sub> · mask-0</code><i>+</i><code>A<sub>N</sub> · mask-1</code></p>
+              <p><code>P<sub>N</sub></code> is the complete prompt used to sample <code>A<sub>N</sub></code>. Replayed earlier messages inside it are context, while <code>A<sub>N</sub></code> and later exact actions still train.</p>
+              <strong>Cross-turn TITO resumes inside the new segment.</strong>
+            </article>
+          </div>
+
+          <div class="continuity-seam"><code>C<sub>N−1</sub></code><span>is not a prefix of</span><code>P<sub>N</sub></code><span>→</span><code>close + restart at P<sub>N</sub></code></div>
+          <p class="slide-claim">Full history splits the record after inference. Incremental chooses a full-rendered fallback or rejects before the next sample.</p>
+        </section>
+
+        <section class="slide" data-title="Realign or split" aria-hidden="true">
+          <p class="eyebrow">7 · REALIGN OR SPLIT</p>
+          <h2>Realign and split spend training coverage differently</h2>
+          <p class="standfirst">slime keeps one packed sample when drift begins inside the latest response and passes a bounded gate. Other mismatches start a new exact sample.</p>
+
+          <div class="continuity-checks realign-choices" aria-label="Training coverage trade-off between realignment and splitting">
+            <article>
+              <span>REALIGN · KEEP ONE SAMPLE</span>
+              <h3>Mask the previous action</h3>
+              <p class="continuity-equation"><code>A′<sub>N−1</sub> · mask-0</code><i>+</i><code>A<sub>N</sub> · mask-1</code></p>
+              <p>The exact replay inside <code>P<sub>N</sub></code> replaces the latest stored response. Masking removes policy-gradient attribution from tokens whose rollout logprobs no longer match.</p>
+              <strong>Cost: the previous action loses its trainable tokens.</strong>
+            </article>
+            <article>
+              <span>SPLIT · START A NEW SAMPLE</span>
+              <h3>Repeat the prompt as context</h3>
+              <p class="continuity-equation"><code>P<sub>N</sub> · mask-0</code><i>+</i><code>A<sub>N</sub> · mask-1</code></p>
+              <p>The prior sample closes with its actions still trainable. Turn N starts from the complete exact prompt used by inference, so replayed history becomes context again.</p>
+              <strong>Cost: repeated history lowers the trainable-token ratio.</strong>
+            </article>
+          </div>
+
+          <div class="continuity-seam realign-threshold"><code>slime default: len(A<sub>N</sub>) &lt; 1,024</code><span>Its realign gate uses the incoming output length, not the number of masked tokens.</span></div>
+          <p class="slide-claim">The threshold chooses between two coverage costs. Certified incremental continuation can avoid both for replay-only drift and has the highest theoretical trainable-token ratio; genuine history changes still split.</p>
+        </section>
+
+        <section class="slide" data-title="White-box limitation" aria-hidden="true">
+          <p class="eyebrow">8 · WHY BLACK-BOX AGENT RL</p>
+          <h2>Black-box RL removes harness coupling—not drift</h2>
+          <p class="standfirst">We first saw the black-box agent-RL pattern in MiniMax Forge; slime, NVIDIA ProRL / Polar, and Miles followed with open-source implementations.</p>
+
+          <div class="emergence-grid" aria-label="White-box harness coupling compared with a black-box model API boundary">
+            <article class="emergence-origin">
+              <p class="emergence-label">White-box · framework-owned loop</p>
+              <h3>New harness means a new integration</h3>
+              <p>The RL stack owns message state, environment steps, tools, reward hooks, and rendering. OpenCode, Pi, or a customer loop must be rewritten or wrapped to implement those interfaces.</p>
+            </article>
+            <div class="oss-cluster">
+              <p class="emergence-label">Black-box · standardized model endpoint</p>
+              <div class="oss-grid" role="list">
+                <article role="listitem">
+                  <h3>Harness stays opaque</h3>
+                  <p>The customer keeps its own loop, tools, sandbox, context management, compaction, and subagents.</p>
+                </article>
+                <article role="listitem">
+                  <h3>One protocol boundary</h3>
+                  <p>Model calls route through the gateway, which captures exact prompt/output IDs and rollout logprobs for training.</p>
+                </article>
+                <article role="listitem">
+                  <h3>Compatibility remains</h3>
+                  <p>Tool-call JSON, reasoning fields, template versions, and history rewrites can still break token lineage. Match, certify, or split.</p>
+                </article>
+              </div>
+            </div>
+          </div>
+
+          <p class="slide-claim">Black-box supports arbitrary harness implementations; it does not make arbitrary harness behavior token-aligned by default.</p>
+        </section>
+
+        <section class="slide slide-light architecture-slide" data-title="Reference architectures" aria-hidden="true">
+          <p class="eyebrow">9 · REFERENCE ARCHITECTURES</p>
+          <h2>Same separation, different control plane</h2>
+
+          <div class="architecture-compare" aria-label="MiniMax Forge and NVIDIA ProRL/Polar architecture comparison">
+            <article class="architecture-panel">
+              <div class="architecture-heading">
+                <h3>MiniMax Forge</h3>
+              </div>
+              <figure>
+                <img src="assets/minimax-forge-architecture.webp" alt="MiniMax Forge architecture showing black-box and white-box agents connected through a gateway server to a data pool, rollout engine, and train engine." />
+              </figure>
+              <p>Agent traffic enters a shared pool; completions retain <code>prompt_ids</code> / <code>response_ids</code> for training.</p>
+              <small class="architecture-credit">Source: MiniMax Forge technical report</small>
+            </article>
+            <article class="architecture-panel">
+              <div class="architecture-heading">
+                <h3>NVIDIA ProRL / Polar</h3>
+              </div>
+              <figure>
+                <img src="assets/nvidia-polar-architecture.svg" alt="NVIDIA Polar architecture showing a rollout server dispatching sessions to gateway nodes that run agent stages, build trajectories, evaluate results, and proxy inference." />
+              </figure>
+              <p>The rollout server schedules sessions; gateway nodes execute agents, build trajectories, evaluate, and proxy inference.</p>
+              <small class="architecture-credit">Source: NVIDIA Polar / ProRL Agent Server · Apache-2.0</small>
+            </article>
+          </div>
+        </section>
+
+        <section class="slide" data-title="Fireworks" aria-hidden="true">
+          <p class="eyebrow">10 · FIREWORKS</p>
+          <h2>We put an exact-token ledger behind an ordinary agent endpoint</h2>
+          <p class="standfirst">OpenCode and Pi keep using OpenAI Chat Completions. The same environment-local sidecar supports replay-preserving and checkpoint-authoritative TITO.</p>
+
+          <div class="fw-pipeline" aria-label="Fireworks TITO Gateway pipeline">
+            <article>
+              <span>01</span>
+              <h3>Intercept</h3>
+              <p>Start the local sidecar and trajectory. Receive <code>/v1/chat/completions</code> from an unmodified harness.</p>
+            </article>
+            <article>
+              <span>02</span>
+              <h3>Classify</h3>
+              <p>Separate policy calls from title, summary, or compaction calls so only policy actions enter the trajectory.</p>
+            </article>
+            <article>
+              <span>03</span>
+              <h3>Choose prompt mode</h3>
+              <p><code>full_history</code> preserves the harness prompt and checks continuity. <code>incremental</code> joins the exact checkpoint with a certified suffix.</p>
+            </article>
+            <article>
+              <span>04</span>
+              <h3>Sample + commit</h3>
+              <p>Send prompt IDs to the sampler; atomically retain completion IDs, logprobs, response evidence, and metrics.</p>
+            </article>
+            <article>
+              <span>05</span>
+              <h3>Materialize</h3>
+              <p>Build training samples from exact IDs and masks without decoding and re-tokenizing the policy action.</p>
+            </article>
+          </div>
+
+          <div class="fw-contract">
+            <span>Integration boundary</span>
+            <strong>OpenCode + Pi · full history default · incremental opt-in · native RolloutRun</strong>
+          </div>
+        </section>
+
+        <section class="slide slide-light" data-title="Sticky routing" aria-hidden="true">
+          <p class="eyebrow">11 · STICKY ROUTING</p>
+          <h2>Sticky routing keeps long rollouts warm</h2>
+          <p class="standfirst">One trajectory gets one opaque affinity key. Its policy turns reuse it; sibling rollouts and retries get fresh keys.</p>
+
+          <div class="affinity-flow" aria-label="Trajectory-scoped sticky routing">
+            <div class="affinity-key">
+              <span>Sidecar-owned</span>
+              <strong>one trajectory affinity key</strong>
+            </div>
+            <div class="affinity-arrow">→</div>
+            <div class="affinity-turns">
+              <span>TURN 1</span><span>TURN 2</span><span>TURN 3</span><span>…</span>
+            </div>
+            <div class="affinity-arrow">→</div>
+            <div class="affinity-target">
+              <span>Serving</span>
+              <strong>compatible rollout state</strong>
+            </div>
+          </div>
+
+          <div class="affinity-rules">
+            <p><strong>Bind once.</strong><br />The sidecar—not the agent harness—creates the key.</p>
+            <p><strong>Reuse every turn.</strong><br />The sampler receives the same typed prompt-cache key.</p>
+            <p><strong>Isolate siblings + retries.</strong><br />Every rollout member and retry gets a distinct trajectory and affinity key.</p>
+          </div>
+        </section>
+
+        <section class="slide" data-title="Gateway placement" aria-hidden="true">
+          <p class="eyebrow">12 · WHERE THE GATEWAY RUNS</p>
+          <h2>Where open TITO gateways run</h2>
+          <p class="standfirst">slime, Miles, and ProRL/Polar keep the gateway outside each sandbox—but share it at different scopes.</p>
+
+          <div class="gateway-placement" aria-label="Gateway placement in three open implementations">
+            <article>
+              <span><span class="brand-lower">slime</span> · rollout process</span>
+              <h3>One host-side adapter</h3>
+              <p>A singleton adapter serves many session IDs. E2B sandboxes call its routable host and port.</p>
+              <strong>1 per rollout process</strong>
+            </article>
+            <article>
+              <span>Miles · session-server pool</span>
+              <h3>Standalone proxy processes</h3>
+              <p>The rollout side picks one server from a pool for each session. Each server hosts many sessions and proxies to inference.</p>
+              <strong>N per pool · many sessions each</strong>
+            </article>
+            <article>
+              <span>ProRL / Polar · worker node</span>
+              <h3>A distributed gateway fleet</h3>
+              <p>A central rollout server schedules sessions. Each gateway node hosts the proxy, runs sandboxes, builds trajectories, and evaluates.</p>
+              <strong>1 per worker node</strong>
+            </article>
+          </div>
+
+          <p class="slide-claim">None of the three reviewed implementations puts one gateway inside every sandbox or container.</p>
+        </section>
+
+        <section class="slide slide-light architecture-slide" data-title="Reference architectures" aria-hidden="true">
+          <p class="eyebrow">13 · REFERENCE ARCHITECTURES</p>
+          <h2>Same separation, different control plane</h2>
+
+          <div class="architecture-compare" aria-label="MiniMax Forge and NVIDIA ProRL/Polar architecture comparison">
+            <article class="architecture-panel">
+              <div class="architecture-heading">
+                <h3>MiniMax Forge</h3>
+              </div>
+              <figure>
+                <img src="assets/minimax-forge-architecture.webp" alt="MiniMax Forge architecture showing black-box and white-box agents connected through a gateway server to a data pool, rollout engine, and train engine." />
+              </figure>
+              <p>Agent traffic enters a shared pool; completions retain <code>prompt_ids</code> / <code>response_ids</code> for training.</p>
+              <small class="architecture-credit">Source: MiniMax Forge technical report</small>
+            </article>
+            <article class="architecture-panel">
+              <div class="architecture-heading">
+                <h3>NVIDIA ProRL / Polar</h3>
+              </div>
+              <figure>
+                <img src="assets/nvidia-polar-architecture.svg" alt="NVIDIA Polar architecture showing a rollout server dispatching sessions to gateway nodes that run agent stages, build trajectories, evaluate results, and proxy inference." />
+              </figure>
+              <p>The rollout server schedules sessions; gateway nodes execute agents, build trajectories, evaluate, and proxy inference.</p>
+              <small class="architecture-credit">Source: NVIDIA Polar / ProRL Agent Server · Apache-2.0</small>
+            </article>
+          </div>
+        </section>
+
+        <section class="slide slide-light" data-title="Fireworks placement decision" aria-hidden="true">
+          <p class="eyebrow">14 · FIREWORKS PLACEMENT DECISION</p>
+          <h2>For Fireworks, TITO belongs inside the sandbox</h2>
+          <p class="standfirst">Training and inference are independent HTTP services, so exact-token interpretation can stay with the harness instead of becoming a shared middleware tier.</p>
+
+          <div class="gateway-placement placement-decision" aria-label="Three reasons Fireworks chooses a per-sandbox TITO sidecar">
+            <article>
+              <span>One-click rollout</span>
+              <h3>Local by construction</h3>
+              <p>The harness and sidecar start together. No public callback URL, host bridge, or fixed port is required to reach TITO.</p>
+              <strong>Localhost inside every sandbox</strong>
+            </article>
+            <article>
+              <span>CPU-side fidelity layer</span>
+              <h3>Repeat the interpreter</h3>
+              <p>The sidecar carries the certified renderer, tokenizer, and exact-token ledger. GPU inference remains remote.</p>
+              <strong>Measure startup + memory</strong>
+            </article>
+            <article>
+              <span>Existing boundary</span>
+              <h3>No new shared middleware</h3>
+              <p>Rollouts already call inference over HTTP; optimization already calls the trainer over HTTP. The sidecar only preserves local protocol and token state.</p>
+              <strong>Reuse the native service split</strong>
+            </article>
+          </div>
+
+          <p class="slide-claim dark"><strong>Trust + durability trade-off:</strong> each sandbox receives the renderer, tokenizer, sidecar code, and a scoped inference credential—and must publish its trajectory before teardown. Server-owned retries start a fresh attempt.</p>
+        </section>
+
+        <section class="slide slide-light" data-title="Native HTTP boundary" aria-hidden="true">
+          <p class="eyebrow">15 · NATIVE SERVICE BOUNDARY</p>
+          <h2>The rollout function hides the harness; HTTP keeps the stack decoupled</h2>
+          <p class="standfirst">Fireworks takes the rollout-function boundary from slime, then keeps inference and training as independent HTTP services.</p>
+
+          <div class="decoupled-architecture" aria-label="Fireworks rollout and training paths through independent HTTP services">
+            <div class="decoupled-rail">
+              <span class="rail-name">Rollout</span>
+              <article class="rollout-function-boundary">
+                <span>User extension · inspired by <span class="brand-lower">slime</span></span>
+                <h3><code>rollout_fn(sample_prompt)</code></h3>
+                <p>Hides the harness, sandbox, tools, grader, and retry policy. Returns one logical <code>RolloutRun</code>.</p>
+              </article>
+              <i class="rail-arrow">⇄</i>
+              <article class="http-service-boundary">
+                <span>Inference HTTP</span>
+                <h3>Exact-token sampling</h3>
+                <p><code>/inference/v1/completions</code></p>
+              </article>
+            </div>
+            <div class="decoupled-rail">
+              <span class="rail-name">Train</span>
+              <article class="rollout-function-boundary">
+                <span>Fireworks async-RL loop</span>
+                <h3><code>RolloutRun</code> → optimization</h3>
+                <p>The SDK owns fanout, grouping, advantages, optimizer steps, and weight publication.</p>
+              </article>
+              <i class="rail-arrow">→</i>
+              <article class="http-service-boundary">
+                <span>Trainer HTTP</span>
+                <h3>Optimize + publish</h3>
+                <p>Independent job-scoped service</p>
+              </article>
+            </div>
+          </div>
+
+          <p class="slide-claim dark">No separate shared gateway tier is required: the sandbox sidecar preserves protocol and token evidence, while existing services own remote sampling, optimization, lifecycle, and weight publication.</p>
+        </section>
+
+        <section class="slide slide-recap" data-title="Recap" aria-hidden="true">
+          <p class="eyebrow">16 · RECAP</p>
+          <h2><span>Three</span> rules for exact agent RL</h2>
+
+          <ol class="recap-list">
+            <li><span>01</span><p><strong>Train on actions, not reconstructions.</strong><br />The transcript is for people; token IDs and aligned logprobs are the policy evidence.</p></li>
+            <li><span>02</span><p><strong>Choose who owns the next prompt.</strong><br />Full history preserves harness inference; incremental uses the exact checkpoint plus a certified suffix.</p></li>
+            <li><span>03</span><p><strong>Spend training coverage explicitly.</strong><br />Realign masks the prior action; split repeats the exact prompt as context. Certified incremental continuation can avoid both for replay-only drift.</p></li>
+          </ol>
+
+          <p class="recap-references"><strong>References</strong><br /><a href="https://www.minimax.io/news/forge-scalable-agent-rl-framework-and-algorithm">MiniMax Forge</a> · <a href="https://github.com/THUDM/slime/tree/a3f500977f33b82de6ac0414c0c43abfe656c3e0/examples/coding_agent_rl">slime coding-agent RL</a> · <a href="https://github.com/NVIDIA-NeMo/ProRL-Agent-Server/tree/6a1ead6bfac054fce6c1e62d1a77b330d96c58db">NVIDIA ProRL Agent / Polar</a> · <a href="https://github.com/radixark/miles/blob/7c547b07bee8a636f19d05040cd1f1700ed7be80/docs/user-guide/agentic-rollout.md">Miles session proxy</a></p>
+          <div class="final-line">Use TITO when exact token evidence is available.<br /><span>Fail closed when it is not.</span></div>
+        </section>
+      </main>
+    </div>
+
+    <nav class="site-nav" aria-label="Site navigation">
+      <a href="../../index.html">Chengxi Li</a>
+      <button class="theme-toggle" type="button" aria-label="Switch color theme">Light</button>
+    </nav>
+    <div class="chrome" aria-label="Slide controls">
+      <button type="button" data-action="prev" aria-label="Previous slide">←</button>
+      <span class="counter"><b data-counter-current>01</b><i>/</i><span data-counter-total>18</span></span>
+      <button type="button" data-action="next" aria-label="Next slide">→</button>
+    </div>
+    <div class="progress" aria-hidden="true"><span data-progress></span></div>
+
+    <script src="deck.js"></script>
+  </body>
+</html>
