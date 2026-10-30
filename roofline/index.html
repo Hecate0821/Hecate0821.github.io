@@ -14,7 +14,8 @@
 <header class="top">
   <span class="eyebrow">MoE · post-training × inference × RL · roofline</span>
   <h1>MoE 训推 Roofline 实验台</h1>
-  <p>同一个 MoE 模型，后训练、推理和 RL rollout 发出的 kernel 几乎没有重合，所以这里各用各的算子图：推理按 SGLang / vLLM / TokenSpeed（以及 torchtitan 的 TitanRL generator）真正发出的 kernel 序列建模，后训练按 Megatron-Core 和 torchtitan 的 fwd / dgrad / wgrad、重算、通信和优化器建模。并行和低精度不单独成页，跟着场景走：训练的 FSDP / CP / EP 放在后训练里，推理的 TP / DP-attention / EP 和投机解码放在推理里，两边的量化各自放进对应的页；RL 一页讲训推不一致、低精度 rollout 和 QAT。所有数字都由同一套核心现场算出，再和公开数据、匿名实测对照。</p>
+  <p>后训练、推理和 RL 发出的 kernel 几乎不重合，所以各用各的算子图：推理按 SGLang / vLLM / TokenSpeed 的 kernel 序列，后训练按 Megatron-Core / torchtitan。并行和低精度跟着场景放；RL 讲训推不一致、确定性、低精度和 QAT。</p>
+  <p class="disc">所有数字都基于开源实现和公开数据推算，和实际可能有较大出入，仅供学习参考。</p>
 </header>
 <nav class="tabs" aria-label="页面">
   <a href="#overview" data-tab="overview">总览</a>

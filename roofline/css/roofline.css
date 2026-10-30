@@ -204,3 +204,5 @@ td .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-righ
   .xchip .xd{display:inline;font-family:var(--f-body);color:var(--ink)}
   .xv{grid-template-columns:minmax(0,1fr) 5em} .xv .bar{grid-column:1/-1;grid-row:2}
 }
+
+header.top .disc{ font-size:.85em; color:var(--muted); margin-top:4px; }
