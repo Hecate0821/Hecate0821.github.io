@@ -2,7 +2,7 @@
 const S = { modelKey:"qwen35", model:clone(MODELS.qwen35), hw:"H200", topo:"hgx8", glob:clone(GLOB),
   inf:clone(BASE_INF), trn:clone(BASE_TRN),
   infPreset:"rec", trnPreset:"slime", tab:"overview", sub:"",
-  q:{ hw:"B200", scheme:"nvfp4", fuse:"fused", shape:"up", N:1024, K:2048, M:64, T:512, ep:8, align:"auto", recipe:"nvfp4hp", Mt:8192, nMicro:4, tokFused:false, roll:0.7, deqRate:40, BM:128 } };
+  q:{ hw:"B200", scheme:"nvfp4", fuse:"fused", shape:"up", N:1024, K:2048, M:64, T:512, ep:8, align:"auto", recipe:"mxfp8", Mt:8192, nMicro:4, tokFused:false, roll:0.7, deqRate:40, BM:128 } };
 function getP(path){ return path.split(".").reduce((o,k)=>o==null?o:o[k], S); }
 function setP(path,v){ const ks=path.split("."); let o=S; for(let i=0;i<ks.length-1;i++) o=o[ks[i]]; o[ks[ks.length-1]]=v; }
 

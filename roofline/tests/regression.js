@@ -8,8 +8,8 @@ const load = require("./load");
   const kp = id => Array.from(d.querySelectorAll(`#${id} .kpi`)).slice(0, 3).map(k => k.querySelector(".n").textContent).join(" | ");
   const warn = () => { const g = d.getElementById("g-warn"); return g.hidden ? "" : g.textContent.slice(0, 140); };
   const bad = key => { const p = d.querySelector(`section[data-pane="${key}"]`); return ((p.textContent + p.innerHTML).match(/(?<!得到 )NaN|undefined|Infinity/g) || []).length + (warn().includes("计算出错") ? 1000 : 0); };
-  const VIEWS = ["overview", "train/quant", "train/calib", "infer/deploy", "infer/quant", "infer/spec", "rl/mismatch", "rl/lowprec", "rl/qat", "appendix/data", "appendix/quant", "appendix/models", "appendix/method"];
-  const NEW = new Set(["h200cp8", "uly256", "mok512", "dm128", "deepep64"]);
+  const VIEWS = ["overview", "train/quant", "train/calib", "infer/deploy", "infer/quant", "infer/spec", "rl/mismatch", "rl/determinism", "rl/lowprec", "rl/qat", "appendix/data", "appendix/quant", "appendix/models", "appendix/method"];
+  const NEW = new Set(["h200cp8", "uly256", "mok64", "dm64"]);
   const t0 = Date.now();
   for (const pass of [0, 1]) for (const m of ["qwen35", "qwen38_27b", "glm53f", "musespark", "kimik3"]) {
     setSel("#g-model", m);

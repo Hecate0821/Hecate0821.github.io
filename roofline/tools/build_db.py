@@ -27,6 +27,8 @@ PUBLIC = {
  "inference_public": dict(file="inference.json", stage="infer", title="推理：公开的服务数字", conditions="各家公布的口径不同，只作量级参考。"),
  "training_public": dict(file="training.json", stage="train", title="训练：公开的 EP 后端数字", conditions="公布方自己的模型和集群。"),
  "spec_public": dict(file="spec.json", stage="infer", title="投机解码：公开数字", conditions="模型、温度、数据集和并发各不相同，只看量级和方向。"),
+ "determinism_public": dict(file="determinism.json", stage="rl", title="确定性推理与训推逐位一致：公开数字",
+   conditions="模型、硬件和测法各不相同；开销是各家相对自己基线的数字，只看量级。"),
  "releases": dict(file="releases.json", stage="meta", title="过去一年的发布与博客",
    conditions="LMSYS 博客，SGLang / vLLM / slime / Miles / AReaL 的 GitHub release；只摘和推理、训练、低精度、投机解码、RL 相关的要点。"),
 }

@@ -57,6 +57,7 @@
   "topic": "训推一致",
   "claim": "训练前向直接调用 vLLM 的 batch-invariant 推理 kernel（block FP8 W8A8、NVFP4 W4A16），反向 STE",
   "value": "每步 log-prob diff = 0，不再需要 TIS / R3；rollout 吞吐为基线的 91.3%（DeepSeek-V4-Flash）/ 87.5%（Nemotron）；基线训推 KL 2e-3 涨到 29.9",
+  "thr": [0.913, 0.875],
   "chk": null
  },
  {

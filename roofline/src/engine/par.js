@@ -9,6 +9,8 @@ const pow2Dom = topo => Math.pow(2, Math.floor(Math.log2(topo.domain)));   // 2 
 const lk = (hw, topo, n, stride) => { const l=link(hw,topo,n,stride); return Object.assign({ n, kind: n<=1 ? "—" : l.intra ? "NVLink" : "IB" }, l); };
 /* 一段线上传输：calls 次调用的固定延迟 + 字节 / 有效带宽 */
 const wireT = (bytes, l, eff, calls, g) => (l.n<=1||bytes<=0) ? 0 : (calls||1)*(l.intra?g.alphaNv:g.alphaIb)*1e-6 + bytes/(l.bw*eff);
+/* 一次集合通信：pass（fwd / rc / bwd）、op（AG / RS / AR / A2A / P2P）、张量、每卡线上字节、时间。调用方的总字节和总时间都由这些加出来 */
+const xc = (pass, op, what, bytes, t) => ({ pass, op, what, bytes, t:t||0 });
 
 const EP = {
   standard:{ name:"NCCL all-to-all（torchtitan 默认）", short:"a2a", col:"s5", fused:false },
@@ -25,27 +27,38 @@ const CP = {
    x：S 文档长度、C、tp、m、d、hw、topo、g、ac（full 重算）、tCore（这一层这一篇的核心 F+B 时间）、kind：full / swa */
 function cpLayer(meth, x){
   const { S, C, tp, m, d, hw, topo, g, ac, tCore, kind } = x, f=m.full;
-  const o = { meth, wire:0, calls:0, tw:0, exposed:0, lk:lk(hw,topo,C,tp), ok:true, why:"" };
+  const o = { meth, wire:0, calls:0, tw:0, exposed:0, lk:lk(hw,topo,C,tp), ok:true, why:"", xs:[] };
   if(C<=1) return o;
   const l = o.lk, gqa = f.kind==="gqa";
   const kvTok = (gqa ? d.kvTokElems/Math.min(tp, f.Hkv) : d.kvTokElems) + (f.kind==="dsa" ? f.idxD : 0);   // 每 token 的 K+V（或 latent + indexer key）元素
   const Lb = 2*(S/C)*kvTok;                                     // 本卡一份 K + V 的字节
+  const kv = f.kind==="gqa" ? "K / V" : "latent KV"+(f.kind==="dsa"?" + indexer key":"");
+  const split = det => { o.wire = det.reduce((s,x)=>s+x.bytes,0); for(const x of det) x.t = o.wire>0 ? o.tw*x.bytes/o.wire : 0; o.xs = det; };   // 每次调用按字节分摊总时间
   if(kind==="swa" && meth!=="ulysses"){                         // 滑窗：只和邻居交换最后 W 个 token
-    o.calls = ac?4:3; o.wire = o.calls*2*Math.min(f.W, S/C)*kvTok;
-    o.tw = wireT(o.wire, l, g.etaAg, o.calls, g); o.exposed = o.tw; return o;
+    const w1 = 2*Math.min(f.W, S/C)*kvTok, det = [xc("fwd","P2P","邻居最后 "+f.W+" 个 token 的 K / V",w1)];
+    if(ac) det.push(xc("rc","P2P","重算：再取邻居的 K / V",w1));
+    det.push(xc("bwd","P2P","反向：再取邻居的 K / V",w1), xc("bwd","P2P","dK / dV 送回邻居",w1));
+    o.calls = det.length; o.tw = wireT(det.length*w1, l, g.etaAg, o.calls, g); split(det); o.exposed = o.tw; return o;
   }
   if(meth==="allgather"){
-    const chunks = gqa ? Math.min(f.Hkv/Math.min(tp,f.Hkv), 2) : 1;
-    o.wire = (ac?4:3)*(C-1)*Lb; o.calls = (ac?8:6)*chunks;
-    o.tw = wireT(o.wire, l, g.etaAg, o.calls, g);
+    const chunks = gqa ? Math.min(f.Hkv/Math.min(tp,f.Hkv), 2) : 1, w1 = (C-1)*Lb, det = [xc("fwd","AG",kv+"（按 KV 头分块）",w1)];
+    if(ac) det.push(xc("rc","AG","重算：再 gather "+kv,w1));
+    det.push(xc("bwd","AG","反向：再 gather "+kv,w1), xc("bwd","RS","d"+kv.replace(/ \/ /g," / d"),w1));
+    o.calls = (ac?8:6)*chunks; o.tw = wireT(det.length*w1, l, g.etaAg, o.calls, g); split(det);
   } else if(meth==="ring"){
-    o.wire = (ac ? 5*C-3 : 4*C-2)*Lb; o.calls = 2*(C-1)+C + (ac?C-1:0);
-    o.tw = wireT(o.wire, l, g.etaAg, o.calls, g);
+    const det = [xc("fwd","P2P",kv+" 绕环 "+(C-1)+" 步",(C-1)*Lb)];
+    if(ac) det.push(xc("rc","P2P","重算：再绕一圈 "+kv,(C-1)*Lb));
+    det.push(xc("bwd","P2P","反向：再绕一圈 "+kv,(C-1)*Lb), xc("bwd","P2P","FP32 dK / dV 绕环 "+C+" 步回到本卡",2*C*Lb));
+    o.calls = 2*(C-1)+C + (ac?C-1:0); o.tw = wireT(det.reduce((s,x)=>s+x.bytes,0), l, g.etaAg, o.calls, g); split(det);
   } else {
     const H = d.Hattn/tp;
-    const units = gqa ? 2*H*f.dh + 2*Math.max(f.Hkv/Math.min(tp,f.Hkv), C)*f.dh : H*(d.dqk+d.dv) + C*kvTok;   // MLA 的 latent 不能按头切，按 C 份复制
-    o.wire = (ac?3:2)*2*(S/C)*units*(C-1)/C; o.calls = ac?12:8;
-    o.tw = wireT(o.wire, l, g.etaN, o.calls, g);
+    // 一次 a2a 发出 (C−1)/C：Q/K/V 序列 → 头，输出 O 头 → 序列。MLA 的 latent 不能按头切，按 C 份复制
+    const uQKV = gqa ? H*f.dh + 2*Math.max(f.Hkv/Math.min(tp,f.Hkv), C)*f.dh : H*d.dqk + C*kvTok, uO = gqa ? H*f.dh : H*d.dv;
+    const a = u => 2*(S/C)*u*(C-1)/C;
+    const det = [xc("fwd","A2A","Q / K / V：序列 → 头",a(uQKV)), xc("fwd","A2A","O：头 → 序列",a(uO))];
+    if(ac) det.push(xc("rc","A2A","重算：Q / K / V 序列 → 头",a(uQKV)), xc("rc","A2A","重算：O 头 → 序列",a(uO)));
+    det.push(xc("bwd","A2A","dO：序列 → 头",a(uO)), xc("bwd","A2A","dQ / dK / dV：头 → 序列",a(uQKV)));
+    o.calls = ac?12:8; o.tw = wireT(det.reduce((s,x)=>s+x.bytes,0), l, g.etaN, o.calls, g); split(det);
     if(H % C){ o.ok=false; o.why = "Ulysses 要求每个 TP rank 的注意力头数 "+H+" 能被 CP="+C+" 整除"; }
   }
   // Ring / AllGather 可以和分块计算重叠，只露出第一块和盖不住的部分；Ulysses 的两次 all-to-all 全部阻塞
@@ -57,7 +70,7 @@ function cpLayer(meth, x){
    x：n 本卡 token、K、Z、E、De、stride、hw、topo、g、ac、prec、imb、tExpF / tExpB（这一层 expert 计算的前向 / 反向含重算）、syncUs、mokF */
 function epLayer(be, x){
   const { n, K, Z, E, De, hw, topo, g, ac, imb } = x, tExpF=x.tExpF||0, tExpB=x.tExpB||0, tExp=tExpF+tExpB;
-  const o = { be, ok:true, why:"", wire:0, ib:0, tw:0, tAlpha:0, tSync:0, t:tExp, extra:0, exch:0, syncs:0, buf:0, lk:lk(hw,topo,E,x.stride||1), parts:null, det:be!=="deepep" };
+  const o = { be, ok:true, why:"", wire:0, ib:0, tw:0, tAlpha:0, tSync:0, t:tExp, extra:0, exch:0, syncs:0, buf:0, lk:lk(hw,topo,E,x.stride||1), parts:null, det:be!=="deepep", xs:[] };
   if(E<=1){ o.parts = { f:[["sm","expert GEMM",tExpF,"moe"]], b:[["sm","expert dgrad + wgrad",tExpB,"moe"]] }; o.buf = n*K*imb*De*2; return o; }
   const l = o.lk, mx = /^mx|fp8/.test(x.prec||"");
   const bd = (mx && (be==="deepep"||be==="distmoe"||be==="mok")) ? 1+1/32 : 2;          // MXFP8 量化融合进 dispatch
@@ -87,6 +100,12 @@ function epLayer(be, x){
   const tD = tWire(disp), tC = tWire(comb), tDB = tWire(dispB), tCB = tWire(combB);
   o.tw = tD + tC + tDB + tCB + (replay ? tD + tC : 0);
   const al = o.tAlpha/o.exch||0, lane = l.intra ? "nvl" : "ib";
+  {  // 逐次调用：AG-RS 后端是 all-gather / reduce-scatter，其余是点对点的 all-to-all（融合后端在 GEMM kernel 里发）
+    const [oD,oC] = be==="ag" ? ["AG","RS"] : ["A2A","A2A"], fz = EP[be].fused ? "（融合在 GEMM 里）" : "", q = bd<2 ? "（MXFP8）" : "";
+    o.xs = [xc("fwd",oD,"dispatch：token 发到 expert 所在卡"+q+fz,disp,tD+al), xc("fwd",oC,"combine：expert 输出发回"+fz,comb,tC+al)];
+    if(replay) o.xs.push(xc("rc",oD,"重算：重放 dispatch"+q,disp,tD+al), xc("rc",oC,"重算：重放 combine",comb,tC+al));
+    o.xs.push(xc("bwd",oD==="AG"?"AG":"A2A","combine 的反向：输出梯度发到 expert"+fz,combB,tCB+al), xc("bwd",oD==="AG"?"RS":"A2A","dispatch 的反向：输入梯度发回"+fz,dispB,tDB+al));
+  }
   if(!EP[be].fused){
     o.t = tExp + o.tw + o.tAlpha + o.tSync;
     const nm = be==="ag" ? ["all-gather token","reduce-scatter 输出"] : be==="deepep" ? ["dispatch（按 rank 去重）","combine"] : ["all-to-all dispatch","all-to-all combine"];
@@ -121,7 +140,11 @@ function epLayer(be, x){
 
 /* ---------- FSDP：一层参数 P 在 F 张卡上切分 ---------- */
 const fsdpBytes = (P, F, aG, gB) => F>1 ? P*(F-1)/F*(aG*2+gB) : 0;
-const fsdpT = (P, F, l, g, aG, gB) => wireT(fsdpBytes(P,F,aG,gB), l, g.etaAg, aG+1, g);
+/* 一层的三次（reshard 关掉时两次）：前向 gather BF16 参数、反向再 gather、反向末尾 reduce-scatter 梯度 */
+const fsdpDet = (P, F, l, g, aG, gB) => { if(F<=1||P<=0) return [];
+  const ag = P*(F-1)/F*2, rs = P*(F-1)/F*gB, t = b => wireT(b, l, g.etaAg, 1, g);
+  return [xc("fwd","AG","BF16 参数",ag,t(ag))].concat(aG===2?[xc("bwd","AG","反向再 gather BF16 参数",ag,t(ag))]:[], [xc("bwd","RS",(gB===4?"FP32":"BF16")+" 梯度",rs,t(rs))]); };
+const fsdpT = (P, F, l, g, aG, gB) => fsdpDet(P,F,l,g,aG,gB).reduce((s,x)=>s+x.t,0);
 
-return { EP, CP, pDest, binomRatio, pow2Dom, lk, wireT, cpLayer, epLayer, fsdpBytes, fsdpT };
+return { EP, CP, xc, pDest, binomRatio, pow2Dom, lk, wireT, cpLayer, epLayer, fsdpBytes, fsdpDet, fsdpT };
 })();

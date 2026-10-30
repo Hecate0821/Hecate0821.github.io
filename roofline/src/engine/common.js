@@ -52,11 +52,8 @@ const HW = {
 };
 const TOPO = {
   hgx8:{ name:"8 卡：单台 HGX（NVLink 域 8）", gpus:8, domain:8 },
-  nvl64:{ name:"64 卡：同一 NVL72 机柜（NVLink 域 72）", gpus:64, domain:72 },
-  hgx64:{ name:"64 卡：8 台 HGX，跨机走 IB", gpus:64, domain:8 },
-  nvl128:{ name:"128 卡：2 个 NVL72 机柜，柜间走 IB", gpus:128, domain:72 },
-  nvl512:{ name:"512 卡：8 个 NVL72 机柜，柜间走 IB", gpus:512, domain:72 }
-};
+  nvl64:{ name:"64 卡：同一 NVL72 机柜（NVLink 域 72）", gpus:64, domain:72 }
+};   // 只算这两种：所有并行组都在一个 NVLink 域内。跨机走 IB 的公式（link、Par.epLayer）还在，但没有拓扑会用到
 const peakOf = (hw,d) => hw[peakKey(d)]*1e12;
 
 /* GQA 的 q + 输出门宽度：门按元素（Qwen）是 Hq·dh，按头（Muse Spark）是 Hq */

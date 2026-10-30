@@ -125,14 +125,13 @@ function trnPresets(fw, mk, topoKey){
     if(mk==="qwen38_27b"){
       add("miles","miles：TP4，8192 token，CPU Adam","miles scripts/run_qwen3_dense.py 的 Qwen3.8-27B 档：TP4（SP）/ PP1 / CP1 / EP1，max-tokens-per-gpu 8192，full recompute，CPU Adam（offload + overlap D2H/H2D + precision-aware optimizer）。Qwen3.5 / 3.6 / 3.8-27B 结构相同，用同一份参数。",{tp:4,cp:1,ep:1,tok:8192});
     } else if(mk==="musespark"){
-      add("milesb300","miles B300：TP8 / PP4 / EP8，8192 token","miles scripts/run_muse_spark_32xb300.py：4 × 8 B300，TP8（SP）/ PP4 / CP1 / EP8 / ETP1，首尾 stage 各 15 层，max-tokens-per-gpu 8192，full recompute；Adam 的 FP32 主权重和动量流式放到本地 NVMe（这里按 offload 算）。原配方 32 卡，这里按 64 卡拓扑算（DP2）。",{tp:8,pp:4,cp:1,ep:8,tok:8192},{topo:"hgx64",hw:"B300"});
-      add("milesh200","miles H200：TP8 / PP8 / EP8，4096 token","miles scripts/run_muse_spark_64xh200.py：8 × 8 H200，TP8 / PP8 / CP1 / EP8，首尾 stage 各 7 层，4096 token，Adam 状态流式放 NVMe。",{tp:8,pp:8,cp:1,ep:8,tok:4096},{topo:"hgx64",hw:"H200"});
+      add("miles","miles：TP8 / PP4 / EP8，8192 token，64 卡 GB300","miles scripts/run_muse_spark_32xb300.py：TP8（SP）/ PP4 / CP1 / EP8 / ETP1，首尾 stage 各 15 层，max-tokens-per-gpu 8192，full recompute；Adam 的 FP32 主权重和动量流式放到本地 NVMe（这里按 offload 算）。原配方是 4 台 8 × B300（32 卡），这里只算单机 8 卡和 NVL72 64 卡两种拓扑，所以按一个 NVL72 里的 64 张 GB300 算（DP2）。选它会切到 NVL72。",{tp:8,pp:4,cp:1,ep:8,tok:8192},{topo:"nvl64",hw:"GB300"});
     } else if(mk==="qwen35"){
       add("miles","miles MTP：TP2 / CP2 / EP8，8192 token","miles scripts/run_qwen3_5_35b_a3b_mtp.py：8 卡，TP2 / CP2 / EP8，8192 token，full recompute，CPU Adam。GDN 的 CP 按头 a2a。",{tp:2,cp:2,ep:8,tok:8192});
       add("miles1","miles 另一档：TP1 / EP8","同一文件里注释掉的另一档：1 / 1 / 1 / 8 / 1。",{tp:1,cp:1,ep:8,tok:8192});
     } else if(mk==="glm53f"){
-      add("slime","slime：TP1 / PP4 / CP8 / EP16，2048 token","slime scripts/run-glm5.3-flash-300B.sh：64 卡，TP1（不开 SP）/ PP4 / CP8 / EP16，每卡 2048 token，--allgather-cp，CPU Adam。选它会切到 64 卡拓扑。",{tp:1,pp:4,cp:8,ep:16,tok:2048,cpType:"allgather"},{topo:"hgx64"});
-      add("miles","miles：TP8 / PP4 / EP16，GPU Adam","miles scripts/run_glm5_3_flash.py：TP8 / PP4 / CP1 / EP(卡数/4)，micro-batch 1，plain Adam（训练状态 offload 到磁盘，这里按不 offload 算）。",{tp:8,pp:4,cp:1,ep:16,tok:4096,offload:false},{topo:"hgx64"});
+      add("slime","slime：TP1 / PP4 / CP8 / EP16，2048 token","slime scripts/run-glm5.3-flash-300B.sh：64 卡，TP1（不开 SP）/ PP4 / CP8 / EP16，每卡 2048 token，--allgather-cp，CPU Adam。原脚本是 8 台 HGX，这里放进一个 NVL72 的 64 卡（所有组都在 NVLink 内）。选它会切到 NVL72。",{tp:1,pp:4,cp:8,ep:16,tok:2048,cpType:"allgather"},{topo:"nvl64"});
+      add("miles","miles：TP8 / PP4 / EP16，GPU Adam","miles scripts/run_glm5_3_flash.py：TP8 / PP4 / CP1 / EP(卡数/4)，micro-batch 1，plain Adam（训练状态 offload 到磁盘，这里按不 offload 算）。按 NVL72 的 64 卡算。",{tp:8,pp:4,cp:1,ep:16,tok:4096,offload:false},{topo:"nvl64"});
     } else if(mk==="kimik3"){
       add("miles","miles：TP4 / PP8 / CP2 / EP8，64 卡 GB300","miles scripts/run_kimi_k3.py（文档里的命令是 LoRA）：64 卡（16×4 GB300），TP4 / PP8 / CP2 / EP8，8192 token，CPU Adam。这里按全参数算，显存几乎贴着上限。选它会切到 NVL72。",{tp:4,pp:8,cp:2,ep:8,tok:8192},{topo:"nvl64",hw:"GB300"});
     }
@@ -150,12 +149,10 @@ function trnPresets(fw, mk, topoKey){
       {tp:1,cp:8,ep:4,tok:32768,S:262144,Gtok:262144,dispatcher:"standard",cpType:"allgather",cpLB:false,linCP:"state",recompute:"full",offload:false},{topo:"hgx8",hw:"H200"});
     if(mk==="qwen38_27b") add("uly256","Ulysses CP8，256K","dense 27B 的长上下文：一篇 256K 切 8 份，Ulysses CP8，dense 参数在 8 卡上 FSDP。",
       {tp:1,cp:8,ep:1,tok:32768,S:262144,Gtok:262144,cpType:"ulysses",linCP:"ulysses",recompute:"full",offload:false});
-    if(mk==="kimik3") add("mok512","GB300 × 512：EP64 MoK，MXFP8","Cursor 训练 K2.7 形状模型的设置套到 K3：8 个 NVL72 机柜，EP64（一个机柜内）走 Mixture-of-Kittens，MXFP8 GEMM，CP4。K3 有 2.8T 参数，FSDP 512 路后状态仍放不下，Adam 放 CPU。",
-      {tp:1,cp:4,ep:64,tok:16384,S:65536,Gtok:16777216,dispatcher:"mok",cpType:"allgather",linCP:"state",prec:"mxfp8",recompute:"full",offload:true},{topo:"nvl512",hw:"GB300"});
-    if(mk==="musespark") add("dm128","GB300 × 128：EP16 Dist-MoE，CP4","两个 NVL72 机柜，EP16 在机柜内走 Dist-MoE，dense FSDP 跨机柜走 IB。",
-      {tp:1,cp:4,ep:16,tok:16384,S:65536,Gtok:8388608,dispatcher:"distmoe",cpType:"allgather",linCP:"state",recompute:"full",offload:false},{topo:"nvl128",hw:"GB300"});
-    if(mk==="glm53f") add("deepep64","B300 × 64（8 台 HGX）：EP16 DeepEP，CP4","EP16 跨两台机器，DeepEP 按节点去重；CP4 在机内。",
-      {tp:1,cp:4,ep:16,tok:16384,S:65536,Gtok:4194304,dispatcher:"deepep",cpType:"allgather",linCP:"state",recompute:"full",offload:false},{topo:"hgx64",hw:"B300"});
+    if(mk==="kimik3") add("mok64","GB300 × 64：EP64 MoK，MXFP8","Cursor 训练 K2.7 形状模型的设置套到 K3：EP64 走 Mixture-of-Kittens，MXFP8 GEMM，CP4。原设置是 8 个 NVL72 机柜，这里只算一个机柜的 64 卡；K3 有 2.8T 参数，Adam 放 CPU。",
+      {tp:1,cp:4,ep:64,tok:16384,S:65536,Gtok:2097152,dispatcher:"mok",cpType:"allgather",linCP:"state",prec:"mxfp8",recompute:"full",offload:true},{topo:"nvl64",hw:"GB300"});
+    if(mk==="musespark") add("dm64","GB300 × 64：EP16 Dist-MoE，CP4","一个 NVL72 机柜，EP16 走 Dist-MoE，dense 参数在 64 卡上 FSDP，全部在 NVLink 内。",
+      {tp:1,cp:4,ep:16,tok:16384,S:65536,Gtok:4194304,dispatcher:"distmoe",cpType:"allgather",linCP:"state",recompute:"full",offload:false},{topo:"nvl64",hw:"GB300"});
   }
   P.push({id:"custom",label:"自定义",src:"",cfg:null});
   return P;

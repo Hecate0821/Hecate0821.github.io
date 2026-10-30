@@ -130,7 +130,7 @@ function renderLayerGantt(r){
   const {m,d}=ctx();
   $("t-gantt-lede").innerHTML="代表层：一个 "+d.Hattn+" 头的全注意力层"+(m.moe.E?" + MoE":" + dense FFN")+"，最忙那张卡，一个 micro-batch（"+fN(r.Tc)+" token）。前向 "+V(fT(G.fEnd))+"，反向"+(r.ops.some(o=>o.rc)?"（含重算）":"")+" "+V(fT(G.end-G.fEnd))+"。"+
     (fs?"前向开头的绿色段是 FSDP 预取下一层的权重，反向末尾是梯度 reduce-scatter；它们和 SM 上的计算并行，链路被 CP / EP 占着时会互相挤。":"Megatron 的 DP 同步不在层里，在 step 尾部。")+
-    ' 各段怎么来的：<a href="#train/par/cp">CP</a> · <a href="#train/par/ep">EP</a> · <a href="#train/par/fsdp">FSDP</a>。';
+    ' 每一次通信的先后、组和字节见<a href="#train/par/comm">一层里的通信</a>；各段怎么来的：<a href="#train/par/cp">CP</a> · <a href="#train/par/ep">EP</a> · <a href="#train/par/fsdp">FSDP</a>。';
   legendInto("t-gantt-legend",GANTT_LEGEND.filter(([n,k])=>segs.some(s=>s.cat===k)).map(([n,k])=>({name:n,col:CAT[k]})));
 }
 
@@ -165,11 +165,11 @@ function renderPar(){
   renderParFsdp(r); renderParCp(r); renderParEp(r);
 }
 
-/* 三条屋顶线：计算算子按 HBM 强度，通信按“能盖它的 FLOP / 线上字节” */
+/* 两条屋顶线：计算算子按 HBM 强度，通信按“能盖它的 FLOP / 线上字节” */
 function renderParRoof(r){
   const {hw,topo}=ctx(), svg=$("p-roof"), W=680, H=360, m={l:64,r:18,t:16,b:44};
   const pk=peakOf(hw,(Train.PREC[S.trn.prec]||Train.PREC.bf16).f);
-  const roofs=[{k:"HBM",bw:hw.hbm*1e9,col:"mem"},{k:"NVLink",bw:hw.nvl*1e9,col:"accent"},{k:"IB",bw:hw.ib*1e9,col:"net"}];
+  const roofs=[{k:"HBM",bw:hw.hbm*1e9,col:"mem"},{k:"NVLink",bw:hw.nvl*1e9,col:"accent"}];
   const agg = pred => { let fl=0,by=0,t=0; for(const o of r.ops) if(pred(o)) for(const p of ["fwd","dgrad","wgrad"]){ fl+=o[p].fl; by+=o[p].by; t+=o[p].t; if(p==="fwd"&&o.rc){ fl+=o.fwd.fl; by+=o.fwd.by; t+=o.fwd.t; } } return {fl,by,t}; };
   const groups=[["attention 核心",o=>o.key==="acore","c-attn"],["线性注意力核心",o=>o.key==="lcore","c-lin"],["expert GEMM",o=>["moe1","act","moe2"].includes(o.key),"c-moe"],
     ["投影 / dense / shared GEMM",o=>(o.group==="attn"&&o.key!=="acore")||(o.group==="lin"&&o.key!=="lcore")||["dense","shared","router","latd","latu"].includes(o.key),"c-lm"],
@@ -263,15 +263,16 @@ function renderParFsdp(r){
   gantt("p-f-pref",[{label:"",lanes:["sm",lane],segs}]);
   $("p-f-pref-lede").textContent="前 "+layers+" 层的前向：第 i 层计算的同时，链路在 gather 第 i+1 层。全注意力层前向约 "+fT(compFull)+(m.lin.n?"，线性注意力层约 "+fT(linPer+ffn):"")+"；每层 gather 约 "+fT(gT(m.lin.n?3:0))+"（"+fs.lkD.kind+"）。gather 比计算长时，SM 上会出现空档，这就是 FSDP 的露出。"+(fs.fs<=1?"当前 dense FSDP 度是 1，没有 gather。":"");
   legendInto("p-f-pref-legend",[{name:"全注意力层",col:CAT.attn},{name:"线性注意力层",col:CAT.lin},{name:"FSDP all-gather",col:CAT.fsdp}]);
-  /* 每卡 token：两种规模各跑一遍 Train.run */
-  const gb=/^GB/.test(S.hw), scen = gb ? [["nvl64","64 卡，一个 NVL72（FSDP 在 NVLink 内）","s1"],["nvl512","512 卡，8 个机柜（FSDP 跨柜走 IB）","s2"]] : [["hgx8","8 卡，一台 HGX（FSDP 在 NVLink 内）","s1"],["hgx64","64 卡，8 台 HGX（FSDP 跨机走 IB）","s2"]];
+  /* 每卡 token：两种拓扑各跑一遍 Train.run（各用自己那一代的卡：HGX 用 B200 / B300 / H200，NVL72 用 GB200 / GB300） */
+  const PAIR={B200:"GB200",GB200:"B200",B300:"GB300",GB300:"B300",H200:"GB200",H100:"GB200"}, gb=/^GB/.test(S.hw), hH=gb?PAIR[S.hw]:S.hw, hN=gb?S.hw:PAIR[S.hw];
+  const scen=[["hgx8",hH,"8 × "+HW[hH].name+"，一台 HGX：FSDP 8 路","s1"],["nvl64",hN,"64 × "+HW[hN].name+"，一个 NVL72：FSDP 64 路","s2"]];
   const ns=[512,1024,2048,4096,8192,16384,32768,65536,131072];
-  const ser=scen.map(([tk,name,col])=>({name,short:name.split("，")[0],col,pts:ns.map(n=>{ const c2=fitPar(Object.assign(parBase(),{tok:n,S:Math.max(n*S.trn.cp,1024)}),TOPO[tk].gpus); const r2=Train.run(m,hw,TOPO[tk],Object.assign({N:TOPO[tk].gpus},c2),g);
+  const ser=scen.map(([tk,hk,name,col])=>({name,short:name.split("，")[0],col,pts:ns.map(n=>{ const c2=fitPar(Object.assign(parBase(),{tok:n,S:Math.max(n*S.trn.cp,1024)}),TOPO[tk].gpus); const r2=Train.run(m,HW[hk],TOPO[tk],Object.assign({N:TOPO[tk].gpus},c2),g);
     return [n, runOK(r2) ? r2.fsdpExposedMB/r2.tMB : null, {hollow:!runFit(r2)}]; })}));
   lineChart("p-f-n",{series:ser,xLog:true,xBase:2,xFmt:fK,yFmt:pc,xLab:"每卡每 micro-batch token",yLab:"FSDP 露出 / micro-batch 时间",vlines:[{x:r.Tc,label:"当前"}],yMin:0});
   legendInto("p-f-n-legend",ser.map(se=>({name:se.name,col:se.col,line:true})));
   const pkb=peakOf(hw,"bf16")*g.etaC, rN=pkb/(hw.nvl*1e9*g.etaAg), rI=pkb/(hw.ib*1e9*g.etaAg);
-  $("p-f-n-lede").textContent="FSDP 每层的字节和 token 数无关，计算和 token 数成正比，所以存在一个每卡 token 下限 n*。只看 GEMM：每个参数每步要 6·n（重算 8·n）FLOP，线上要 (a·2 + b_g)·(F−1)/F 字节，n* ≈ (a·2 + b_g) / 6 × 峰值 / 带宽。"+hw.name+" 上 NVLink 的“峰值 / 带宽”约 "+fN(rN)+"，IB 约 "+fN(rI)+"：同样的 FSDP 跨机后要多 "+fN(rI/rN)+" 倍的 token 才能藏住。下图两条线是同一套配置分别放到两种规模上（TP / CP / EP 不够分时自动缩小），露出包括第一层的 gather 和链路被 CP / EP 占用的部分；空心点是显存放不下。";
+  $("p-f-n-lede").textContent="FSDP 每层的字节和 token 数无关，计算和 token 数成正比，所以存在一个每卡 token 下限 n*。只看 GEMM：每个参数每步要 6·n（重算 8·n）FLOP，线上要 (a·2 + b_g)·(F−1)/F 字节，n* ≈ (a·2 + b_g) / 6 × 峰值 / 带宽。"+hw.name+" 上 NVLink 的“峰值 / 带宽”约 "+fN(rN)+"。这里只算单机 8 卡和 NVL72 64 卡，FSDP 都在 NVLink 内；分片从 8 路变成 64 路，每卡字节只从 7/8 变成 63/64，n* 几乎不变，两条线的差别主要来自两种卡的峰值和显存。（FSDP 一旦跨机走 IB，n* 要再乘 NVLink / IB 的带宽比，"+hw.name+" 上约 "+fN(rI/rN)+" 倍。）下图两条线是同一套配置分别放到两种拓扑上（TP / CP / EP 不够分时自动缩小），露出包括第一层的 gather 和链路被 CP / EP 占用的部分；空心点是显存放不下。";
   $("p-f-tbl").innerHTML='<thead><tr><th>层类型</th><th>层数</th><th>每层每卡参数</th><th>分片组</th><th>每层 FSDP 字节</th><th>每层线上时间</th><th>每层前向计算</th></tr></thead><tbody>'+
     [["全注意力"+(moe?" + MoE 复制部分":""),m.full.n,fs.pFull,fs.fs,fs.lkD,compFull],...(m.lin.n?[["线性注意力"+(moe?" + MoE 复制部分":""),m.lin.n,fs.pLin,fs.fs,fs.lkD,linPer+ffn]]:[]),...(m.dense.n?[["dense FFN",m.dense.n,fs.pDen,fs.fs,fs.lkD,P.den.f]]:[]),...(moe?[["expert（本卡 1/EP）",r.nM,fs.pExpL,fs.fe,fs.lkE,P.exp.f]]:[])]
     .map(([k,nL,Pp,F,l,cf])=>{ const by=Par.fsdpBytes(Pp,F,fs.aG,fs.gB); return '<tr><td>'+esc(k)+'</td><td class="num">'+nL+'</td><td class="num">'+fN(Pp)+'</td><td class="num">'+F+(F>1?"（"+l.kind+"）":"")+'</td><td class="num">'+(F>1?fB(by):"—")+'</td><td class="num">'+(F>1?fT(Par.fsdpT(Pp,F,l,g,fs.aG,fs.gB)):"—")+'</td><td class="num">'+fT(cf)+'</td></tr>'; }).join("")+'</tbody>';

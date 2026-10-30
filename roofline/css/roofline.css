@@ -161,3 +161,46 @@ a.card:hover{border-color:var(--accent)}
 a.card h4{color:var(--accent)}
 ul.rel-hl{margin:0;padding-left:16px;max-width:none} ul.rel-hl li{margin:1px 0}
 .nw{white-space:nowrap}
+
+/* 一层里的通信：行是先后，列是本卡计算 + 每个并行维度一条道（后训练 · 并行、推理 · 部署） */
+.xwrap{overflow-x:auto;margin:6px 0 4px}
+.xplan{display:grid;grid-template-columns:2.2em minmax(13em,1.25fr) repeat(var(--k,1),minmax(10em,1fr));font-size:12.5px;line-height:1.45;border:1px solid var(--line);border-radius:10px;background:var(--panel);min-width:min(100%,calc(16em + var(--k,1)*10em))}
+.xplan .xr{display:contents}
+.xplan .xr>div{padding:5px 7px;border-top:1px solid var(--grid);min-width:0}
+.xplan .xh>div{border-top:none;background:var(--soft);font-size:12px;color:var(--muted)}
+.xplan .xh>div:first-child{border-top-left-radius:10px} .xplan .xh>div:last-child{border-top-right-radius:10px}
+.xplan .xh .xl{border-top:3px solid var(--c)} .xplan .xh .xl b{color:var(--ink);font-family:var(--f-display)} .xplan .xh .xl span{display:block;font-family:var(--f-mono);font-size:10.5px}
+.xplan .xs{grid-column:1/-1;padding:9px 10px 3px;border-top:1px solid var(--line);font-family:var(--f-display);font-weight:700;font-size:13px}
+.xplan .xs span{font-weight:400;color:var(--muted)} .xplan .xs.sub{background:var(--soft)}
+.xplan .xn{font-family:var(--f-mono);font-size:10.5px;color:var(--muted);text-align:right;padding-right:2px!important}
+.xplan .xc0{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.xplan .xr:not(.xh) .xc0{border-left:3px solid var(--cc,var(--c-oth));padding-left:8px}
+.xplan .xc0 .t{font-family:var(--f-mono);font-size:11px;color:var(--muted);white-space:nowrap}
+.xplan .xc0.ghost{color:var(--muted);border-left-style:dotted!important}
+.xplan .xc0.wait{color:var(--muted);font-size:11.5px;border-left-color:transparent!important;background:repeating-linear-gradient(135deg,transparent 0 6px,var(--soft) 6px 9px)}
+.xchip{position:relative;border:1px solid var(--c);border-left-width:3px;border-radius:6px;padding:3px 6px 6px;margin:0 0 4px;background:color-mix(in srgb,var(--c) 13%,var(--panel));cursor:default}
+.xchip:last-child{margin-bottom:0}
+.xchip.bg{background:var(--panel);border-style:dashed;border-left-style:solid}
+.xchip.part,.xchip.fused{background:color-mix(in srgb,var(--c) 6%,var(--panel));border-style:dotted;border-left-style:solid}
+.xchip .x1{display:flex;gap:5px;align-items:baseline}
+.xchip .xo{font:700 10.5px var(--f-mono);color:var(--ink);flex:none}
+.xchip .x2{display:flex;flex-wrap:wrap;gap:0 7px;align-items:baseline;font-family:var(--f-mono);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.xchip .x2 b{color:var(--ink)} .xchip .x2 em{font-style:normal;font-family:var(--f-body);font-size:10.5px}
+.xchip .xd{display:none}
+.xchip .xbar{position:absolute;left:6px;right:6px;bottom:2px;height:2px;background:var(--grid);border-radius:1px}
+.xchip .xbar i{display:block;height:100%;background:var(--c);border-radius:1px}
+.xleg .xk{width:16px;height:10px;border-radius:3px;border:1px solid var(--muted)}
+.xleg .xk.block{background:color-mix(in srgb,var(--muted) 25%,var(--panel))} .xleg .xk.bg{border-style:dashed} .xleg .xk.part{border-style:dotted}
+.xvol{display:grid;gap:6px;margin:6px 0 10px}
+.xv{display:grid;grid-template-columns:minmax(8em,15em) minmax(0,1fr) 6em;gap:10px;align-items:center;font-size:12.5px}
+.xv .lab span{color:var(--muted)} .xv .num{font-family:var(--f-mono);text-align:right;font-variant-numeric:tabular-nums}
+.xv .bar{display:flex;gap:2px;height:14px} .xv .bar i{display:block;height:100%;border-radius:2px;min-width:2px}
+td .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+@media (max-width:720px){
+  .xplan{grid-template-columns:2em minmax(0,1fr);min-width:0}
+  .xplan .xh{display:none}
+  .xplan .xr>.xl{grid-column:2;border-top:none;padding-top:0}
+  .xplan .xr>.xl:empty{display:none}
+  .xchip .xd{display:inline;font-family:var(--f-body);color:var(--ink)}
+  .xv{grid-template-columns:minmax(0,1fr) 5em} .xv .bar{grid-column:1/-1;grid-row:2}
+}

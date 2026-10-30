@@ -70,15 +70,17 @@ function moeLayer(hw, g, m, key, T, ep, o){
 /* 训练配方：f 前向，b 反向（dgrad + wgrad）；w2d 权重方块（一份 qdata 两个方向共用）；
    hp：反向用原始 BF16 操作数（orig）或前向量化值反量化后的 BF16（deq）；tok：NVFP4 激活按 token 的 FP32 scale；rht：wgrad 输入做随机 Hadamard */
 const RECIPES = {
-  bf16:    { name:"BF16", f:"bf16", b:"bf16", same:"—", who:"基线" },
-  mxfp8:   { name:"MXFP8，TE 默认", f:"mxfp8", b:"mxfp8", w2d:false, same:"是（rollout 只用行方向那份）", who:"Miles --fp8-recipe mxfp8；Megatron / TE" },
-  mxfp8tt: { name:"MXFP8，torchtitan 32×32 权重", f:"mxfp8", b:"mxfp8", w2d:true, same:"是（Dist-MoE 推理也用 32×32）", who:"torchtitan / torchao mxfp8_rceil" },
-  mxfp8hp: { name:"MXFP8 前向 + BF16 反向", f:"mxfp8", b:"bf16", hp:"orig", same:"是", who:"NVTE_BACKWARD_OVERRIDE=high_precision" },
-  nvfp4:   { name:"NVFP4，TE 预训练默认", f:"nvfp4", b:"nvfp4", w2d:true, rht:true, same:"否（rollout 是 1D 1×16，训练权重 16×16）", who:"TE NVFP4BlockScaling 默认（2D 权重、RHT、SR）" },
-  nvfp4hp: { name:"NVFP4 前向 + BF16 反向", f:"nvfp4", b:"bf16", hp:"orig", tok:true, same:"是", who:"Miles --train-nvfp4 脚本默认（1D 权重、按 token scale、NVTE_BACKWARD_OVERRIDE=high_precision）；miniTE 的 BF16 反向同口径" },
-  nvfp4dq: { name:"NVFP4 前向 + 反量化 BF16 反向", f:"nvfp4", b:"bf16", hp:"deq", tok:true, same:"是", who:"4-bitter Lesson 最终配方（NVTE_BACKWARD_OVERRIDE=dequantized，另加 4/6 与末 15% 层 BF16）" }
+  bf16:    { name:"BF16", f:"bf16", b:"bf16", who:"基线" },
+  fp8:     { name:"block FP8（权重 128×128，激活 1×128）", f:"fp8", b:"fp8", w2d:true, who:"Megatron --fp8-recipe blockwise（DeepSeek-V3 的配方）" },
+  mxfp8:   { name:"MXFP8，TE 默认", f:"mxfp8", b:"mxfp8", w2d:false, who:"Megatron --fp8-recipe mxfp8；Miles" },
+  mxfp8tt: { name:"MXFP8，torchtitan 32×32 权重", f:"mxfp8", b:"mxfp8", w2d:true, who:"torchtitan / torchao mxfp8_rceil" },
+  nvfp4:   { name:"NVFP4，TE 预训练默认", f:"nvfp4", b:"nvfp4", w2d:true, rht:true, who:"TE NVFP4BlockScaling 默认（2D 权重、RHT、随机舍入）" },
+  // 下面三种是 RL 的配方（前向低精度、反向 BF16），只在 RL · 低精度训练与 QAT 一节用
+  mxfp8hp: { name:"MXFP8 前向 + BF16 反向", f:"mxfp8", b:"bf16", hp:"orig", who:"NVTE_BACKWARD_OVERRIDE=high_precision" },
+  nvfp4hp: { name:"NVFP4 前向 + BF16 反向", f:"nvfp4", b:"bf16", hp:"orig", tok:true, who:"Miles --train-nvfp4 脚本默认" },
+  nvfp4dq: { name:"NVFP4 前向 + 反量化 BF16 反向", f:"nvfp4", b:"bf16", hp:"deq", tok:true, who:"The 4-bitter Lesson 的最终配方" }
 };
-const RORDER = ["bf16","mxfp8","mxfp8tt","mxfp8hp","nvfp4","nvfp4hp","nvfp4dq"];
+const RORDER = ["bf16","fp8","mxfp8","mxfp8tt","nvfp4"];   // 后训练页只列 Megatron / TE / torchtitan 的默认配方
 
 /* 一个线性层一个 micro-batch 的三遍 GEMM + 量化 kernel；权重量化每个 step 做一次，按 micro-batch 数摊开 */
 function trainGemm(hw, g, key, M, N, K, o){

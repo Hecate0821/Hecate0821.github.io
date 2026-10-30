@@ -2,7 +2,7 @@
 const QC = { bf16:css("c-lm"), fp8:css("c-attn"), mxfp8:css("c-lin"), w4a16:css("c-ar"), w4a8:css("c-cp"), mxfp4:css("c-moe"), nvfp4:css("c-a2a") };
 const QE2E = { bf16:{wDt:"bf16",eAct:"",dDt:"bf16"}, fp8:{wDt:"fp8",eAct:"",dDt:"fp8"}, mxfp8:{wDt:"mxfp8",eAct:"",dDt:"mxfp8"},
   w4a16:{wDt:"mxfp4",eAct:"bf16",dDt:"bf16"}, w4a8:{wDt:"mxfp4",eAct:"mxfp8",dDt:"mxfp8"}, mxfp4:{wDt:"mxfp4",eAct:"",dDt:"bf16"}, nvfp4:{wDt:"nvfp4",eAct:"",dDt:"bf16"} };
-const QTRN = ["bf16","fp8","mxfp8","mxfp8hp","nvfp4","nvfp4hp"];
+const QTRN = ["bf16","fp8","mxfp8","nvfp4"];
 const DTN = { bf16:"BF16", fp8:"FP8 block", mxfp8:"MXFP8", mxfp4:"MXFP4", nvfp4:"NVFP4" };
 const qOpt = (over) => Object.assign({ fuse:S.q.fuse, align:1, floor:false, BM:S.q.BM, deqRate:S.q.deqRate }, over||{});   // 单个 GEMM 按纯 roofline，不计 kernel 最短时间
 const qTopo = h => /^GB/.test(h) ? "nvl64" : (S.topo==="nvl64" ? "hgx8" : S.topo);
@@ -46,6 +46,7 @@ function qCheck(key, hw){
 function qHead(){
   const q=S.q, hw=HW[q.hw], Q=Quant, SC=Q.SCHEMES;
   fillOpts($("q-scheme"), Q.ORDER.map(k=>[k,SC[k].short+"："+SC[k].name]), q.scheme);
+  if(!Q.RORDER.includes(q.recipe)) q.recipe="mxfp8";
   fillOpts($("q-recipe"), Q.RORDER.map(k=>[k,Q.RECIPES[k].name]), q.recipe);
   $("q-hw-note").textContent = hw.name+"：BF16 "+hw.bf16/1000+" / FP8 "+hw.fp8/1000+" / FP4 "+hw.fp4/1000+" PFLOPS（dense），HBM "+hw.hbm/1000+" TB/s，"+hw.mem+" GB。"+
     (/^GB/.test(q.hw)?"放回整个模型时按 NVL72 机柜算。":"放回整个模型时按 HGX 算。")+"推理页 / 后训练页的配置照搬，只换精度。";
@@ -116,12 +117,13 @@ function renderQuantInfer(){
   const big16=Q.gemm(hw,g,"bf16",16384,N,K,o), big4=Q.gemm(hw,g,"w4a16",16384,N,K,o);
   A.push("拐点 M*：BF16 "+V(fInt(Ms.bf16))+"、W4A16 "+V(fInt(Ms.w4a16))+"、W8A8 "+V(fInt(Ms.mxfp8))+"、W4A4 "+V(fInt(Ms.nvfp4))+"。M 在拐点左边时，只要权重变窄就快；M = 16K 时 W4A16 是 BF16 的 "+V(fX(big16.t/big4.t))+"，因为 MMA 还是 BF16，每 "+q.BM+" 行还要反量化一遍权重（反量化吞吐是可调的经验值）。");
   if(!hasMoE) A.push(esc(m.short)+" 是 dense 模型：decode 每步要读全部 "+V(fN(d.total))+" 参数，量化权重直接按比例省带宽；但同样的 batch 下每个 GEMM 的 M 就是整批 token，比 MoE 的每 expert 行数大 E/k 倍，更早越过拐点，所以大 batch 时只有激活也降精度（W8A8 / W4A4）才继续有收益。");
-  else A.push(esc(m.short)+" 的 routed expert 占总参数 "+V(pct(d.pExpertsAll,d.total))+"："+(ec>0.8?"只量化 expert 就拿到大部分显存和带宽收益，这也是 Miles / SGLang NVFP4 只量化 expert 的原因。":"非 expert 部分也不小，只量化 expert 的收益有限。")+"但按每 token 实际经过的参数算，routed expert 只占 "+V(pct(d.nMoe*m.moe.k*d.pExpert,d.active))+"，所以省的主要是显存和权重带宽，不是算力；留在 BF16 的 router、shared expert、注意力投影和 lm_head 恰好也是量化后最敏感的部分。当前 T 下每个 expert 只有 "+V(fI(lam))+" 行，补齐到 "+Lc.a+" 行浪费 "+V(pct(Lc.rowsPad-Lc.rows,Lc.rowsPad))+" 的算力"+(Lc.bound==="memory"?"，但这一层是 memory-bound，浪费的算力不影响时间。":"，这一层已经是 compute-bound，补齐直接变成时间。"));
+  else A.push(esc(m.short)+" 的 routed expert 占总参数 "+V(pct(d.pExpertsAll,d.total))+"："+(ec>0.8?"只量化 expert 就拿到大部分显存和带宽收益，这也是 NVFP4 rollout 只量化 expert 的原因（<a href=\"#rl/lowprec\">RL · 低精度 rollout</a>）。":"非 expert 部分也不小，只量化 expert 的收益有限。")+"但按每 token 实际经过的参数算，routed expert 只占 "+V(pct(d.nMoe*m.moe.k*d.pExpert,d.active))+"，所以省的主要是显存和权重带宽，不是算力；留在 BF16 的 router、shared expert、注意力投影和 lm_head 恰好也是量化后最敏感的部分。当前 T 下每个 expert 只有 "+V(fI(lam))+" 行，补齐到 "+Lc.a+" 行浪费 "+V(pct(Lc.rowsPad-Lc.rows,Lc.rowsPad))+" 的算力"+(Lc.bound==="memory"?"，但这一层是 memory-bound，浪费的算力不影响时间。":"，这一层已经是 compute-bound，补齐直接变成时间。"));
   const qs=Q.gemm(hw,g,cur,M,N,K,qOpt({fuse:"separate"})), qf=Q.gemm(hw,g,cur,M,N,K,qOpt({fuse:"fused"}));
   if(SC[cur].a!=="bf16") A.push("激活单独量化时，按纯 roofline 这个 GEMM 多 "+V(fT(qs.tQ))+"（"+pct(qs.tQ,qf.t)+"），字节是 M·K·(2 + 量化后字节)，随 M 线性涨。M 小时真正的代价是多一个 kernel 的最短时间和 launch：SGLang 把 RMSNorm 和 NVFP4 量化融合后，并发 1 快 6%、并发 128 只快 1%（#44554）。hidden 小的模型上这笔字节又摊不开：vLLM 在 hidden 2048 的 Qwen3.6-35B-A3B 上 W4A8 端到端反而比 W4A16 慢 3–8%（#59815）。");
   const bestI=Q.ORDER.filter(k=>k!=="bf16"&&IE[k].mem.avail>0).sort((a,b)=>IE[a].stepT-IE[b].stepT)[0];
   if(bestI) A.push("放回整个 decode 一步，最快的是 "+esc(SC[bestI].short)+" "+V(fX(ib.stepT/IE[bestI].stepT))+"：注意力读 KV、通信、launch 这些不随权重精度变，单个 GEMM 的加速在整步里被摊薄。量化还多换来显存：同样的卡，BF16 并发上限 "+V(fInt(ib.mem.Bmax))+"，"+esc(SC[bestI].short)+" "+V(fInt(IE[bestI].mem.Bmax))+"。");
   A.push("B300 和 B200 只差 FP4 峰值（13.5 对 9 PF）和显存（288 对 180 GB）：拐点以左两者一样快，所以小并发 decode 换 B300 不会更快，只能放更多请求；GB200 / GB300 是同一颗芯片，BF16 / FP8 峰值高约 11%，主要差别在 NVL72 的 a2a 和权重同步。");
+  A.push("这一节只看精度对推理本身的影响。RL 的 rollout 还要和训练侧量化逐位一致、每步同步权重，见 <a href=\"#rl/lowprec\">RL · 低精度 rollout</a>；低精度 kernel 的 batch invariance 见 <a href=\"#rl/determinism\">RL · 确定性 rollout</a>。");
   $("q-analysis-inf").innerHTML=ul(A);
 }
 
@@ -131,8 +133,8 @@ function renderQuantTrain(){
   const Mt=Math.max(16,q.Mt), TR={}, to={nMicro:q.nMicro,tokFused:q.tokFused};
   Q.RORDER.forEach(k=>TR[k]=Q.trainGemm(hw,g,k,Mt,N,K,to));
   const ideal=k=>{ const R=Q.RECIPES[k], rf=peakOf(hw,R.f)/peakOf(hw,"bf16"), rb=peakOf(hw,R.b)/peakOf(hw,"bf16"); return (1/rf+2/rb)/3; };
-  table($("q-train"),["配方","fprop","dgrad","wgrad","量化相关 kernel","合计","相对 BF16","只看峰值","反向要留的（X + W 缓存）","量化与 rollout 逐位一致","谁在用"],
-    Q.RORDER.map(k=>{ const r=TR[k]; return {cls:k===q.recipe?"hl":"",cells:[esc(r.R.name),fT(r.fprop),fT(r.dgrad),fT(r.wgrad),r.tq?fT(r.tq):"—",fT(r.t),fX(TR.bf16.t/r.t),fX(1/ideal(k)),fB(r.extra),esc(r.R.same),esc(r.R.who)]}; }),[1,2,3,4,5,6,7,8]);
+  table($("q-train"),["配方","fprop","dgrad","wgrad","量化相关 kernel","合计","相对 BF16","只看峰值","反向要留的（X + W 缓存）","谁在用"],
+    Q.RORDER.map(k=>{ const r=TR[k]; return {cls:k===q.recipe?"hl":"",cells:[esc(r.R.name),fT(r.fprop),fT(r.dgrad),fT(r.wgrad),r.tq?fT(r.tq):"—",fT(r.t),fX(TR.bf16.t/r.t),fX(1/ideal(k)),fB(r.extra),esc(r.R.who)]}; }),[1,2,3,4,5,6,7,8]);
   const tr=TR[q.recipe];
   stackBar($("q-tbar"),$("q-tbarlist"),[{label:"fprop（"+DTN[tr.R.f]+"）",v:tr.fprop,color:css("c-attn")},{label:"dgrad（"+DTN[tr.R.b]+"）",v:tr.dgrad,color:css("c-moe")},{label:"wgrad（"+DTN[tr.R.b]+"）",v:tr.wgrad,color:css("c-lin")},
     ...tr.q.map((z,i)=>({label:z[0],v:z[1],color:[css("c-cp"),css("c-a2a"),css("c-ar"),css("c-dp"),css("muted")][i%5]}))],tr.t,fT);
@@ -143,12 +145,12 @@ function renderQuantTrain(){
   table($("q-e2e-trn"),["训练：GEMM 精度","step 时间","每卡 tok/s","相对 BF16","低精度权重缓存","显存"],
     QTRN.map(k=>{ const r=TE[k]; return {cls:k===q.recipe?"hl":"",cells:[esc(Train.PREC[k].name),fT(r.stepT),fN(r.tokPerGpu),fX(tb.stepT/r.stepT),fB(r.mem.qW),fB(r.mem.used)+(r.mem.used>r.mem.total?' <span class="tag">超出</span>':"")]}; }),[1,2,3,4,5]);
   // 解析
-  const A=[], f=Math.min(1,Math.max(0,q.roll));
-  const best=Q.RORDER.filter(k=>k!=="bf16").sort((a,b)=>TR[a].t-TR[b].t)[0];
-  A.push("单个 GEMM（M = "+fInt(Mt)+"）：最快的是 "+esc(Q.RECIPES[best].name)+" "+V(fX(TR.bf16.t/TR[best].t))+"；"+esc(Q.RECIPES.nvfp4hp.name)+" "+V(fX(TR.bf16.t/TR.nvfp4hp.t))+(q.tokFused?"。":"，per-token scale 没融合时多出的逐元素 op 吃掉了前向 FP4 的收益，和 LMSYS 测到的“NVFP4 训练比 BF16 慢”一致。"));
+  const A=[], best=Q.RORDER.filter(k=>k!=="bf16").sort((a,b)=>TR[a].t-TR[b].t)[0], mx=TR.mxfp8, tt=TR.mxfp8tt, wq=r=>(r.q.find(z=>/^W 量化/.test(z[0]))||[0,0])[1];
+  A.push("单个 GEMM（M = "+fInt(Mt)+"）：最快的是 "+esc(Q.RECIPES[best].name)+" "+V(fX(TR.bf16.t/TR[best].t))+"，只看峰值是 "+V(fX(1/ideal(best)))+"：差的是量化 kernel 和权重的转置副本。"+
+    "MXFP8 两种权重块只差在权重上：TE 默认的 1D 块要行、列两份（缓存 "+fB(mx.wCache)+"），torchtitan 的 32×32 方块一份（"+fB(tt.wCache)+"）；权重量化每个 step 做一次、按 "+q.nMicro+" 个 micro-batch 摊开，时间上只差 "+fT(wq(mx)-wq(tt))+"。");
   const bestT=QTRN.filter(k=>k!=="bf16").sort((a,b)=>TE[a].stepT-TE[b].stepT)[0];
   A.push("放回整个 step，最快的 "+esc(Train.PREC[bestT].name)+" 只快 "+V(fX(tb.stepT/TE[bestT].stepT))+"：注意力核心、线性注意力、通信、优化器和逐元素算子都不随 GEMM 精度变（Amdahl）。");
-  A.push("RL 里训练只占一步的 "+V(((1-f)*100).toFixed(0)+"%")+"（BF16 时 rollout 占 "+f+"），rollout 的加速才是主项，见 <a href=\"#rl/lowprec\">RL · 低精度 rollout</a>。");
+  A.push("这一节只看默认配方对训练速度的影响。RL 里训练要和低精度 rollout 对齐，常用前向低精度、反向 BF16（<code>high_precision</code> / <code>dequantized</code>）和 QAT，这些放在 <a href=\"#rl/qat\">RL · 低精度训练与 QAT</a>；整个 RL 一步的账见 <a href=\"#rl/lowprec\">RL · 低精度 rollout</a>。");
   $("q-analysis-trn").innerHTML=ul(A);
 }
 
@@ -169,7 +171,7 @@ function qRL(){
   const {q,hw,Q,SC}=qHead(), f=Math.min(1,Math.max(0,q.roll)), sp=(sr,st)=>1/(f/sr+(1-f)/st);
   const IE={}, TE={}; ["bf16","mxfp8","nvfp4","w4a16"].forEach(k=>IE[k]=qInferE2E(hw,k)); ["bf16","mxfp8","mxfp8hp","nvfp4","nvfp4hp"].forEach(k=>TE[k]=qTrainE2E(hw,k));
   const RLC=[["BF16 训练 + BF16 rollout","bf16","bf16","是"],["MXFP8 端到端","mxfp8","mxfp8","是"],["MXFP8 rollout + MXFP8 前向 / BF16 反向","mxfp8","mxfp8hp","是"],
-    ["NVFP4 expert rollout + NVFP4 前向 / BF16 反向（Miles 脚本；dequantized 反向的单层开销见 QAT 一节）","nvfp4","nvfp4hp","是：1D 1×16、按 token"],["NVFP4 expert rollout + TE 默认 NVFP4 训练","nvfp4","nvfp4","否：训练权重 16×16，rollout 1×16"],
+    ["NVFP4 expert rollout + NVFP4 前向 / BF16 反向（Miles 脚本；各种反向一个 GEMM 的开销见低精度训练与 QAT 一节）","nvfp4","nvfp4hp","是：1D 1×16、按 token"],["NVFP4 expert rollout + TE 默认 NVFP4 训练","nvfp4","nvfp4","否：训练权重 16×16，rollout 1×16"],
     ["W4A16 rollout + BF16 训练","w4a16","bf16","否：训练是 BF16，只能靠 QAT 假量化补（slime INT4 配方）"]];
   table($("q-rl"),["RL 组合","rollout 加速","训练加速","一步加速（f = "+f+"）","两侧量化一致"],
     RLC.map(([n,a,t,c])=>{ const sr=IE.bf16.stepT/IE[a].stepT, st=TE.bf16.stepT/TE[t].stepT; return [esc(n),fX(sr),fX(st),fX(sp(sr,st)),esc(c)]; }),[1,2,3]);

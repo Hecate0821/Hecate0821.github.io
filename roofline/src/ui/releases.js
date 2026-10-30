@@ -15,10 +15,15 @@ function relLink(p, v, label){
   const r=relOf(p,v); if(!r) throw new Error("数据点库里没有这条发布："+p+" "+v);
   return aOut(r.url, label || (p==="lmsys" ? "LMSYS "+r.date : REL_N[p]+" "+v));
 }
-/* 精选条目 → 按日期排的表。条目是 [项目, 版本, 说明]，或 {ev: 正则, t: 说明}（取量化证据集里 url 匹配的那条） */
+/* 公开数字按出处取：量化证据集按 url 正则，确定性一节按 id；库里没有就报错 */
+function evOf(re){ const p=DB.set("quant_evidence").find(q=>re.test(q.url)); if(!p) throw new Error("数据点库里没有 "+re); return p; }
+function detOf(id){ const p=DB.set("determinism_public").find(q=>q.id==="determinism_public:"+id); if(!p) throw new Error("数据点库里没有 "+id); return p; }
+const evLink = (re, label) => { const p=evOf(re); return aOut(p.url, label||p.src); };
+const detLink = (id, label) => { const p=detOf(id); return aOut(p.url, label||p.src); };
+/* 精选条目 → 按日期排的表。条目是 [项目, 版本, 说明]，{ev: 正则, t: 说明}（量化证据集里 url 匹配的那条），或 {det: id, t: 说明} */
 function ossTable(el, items){
   const rows=items.map(x=>{
-    if(x.ev){ const p=DB.set("quant_evidence").find(q=>x.ev.test(q.url)); if(!p) throw new Error("数据点库里没有 "+x.ev); return { date:p.date, src:aOut(p.url,p.src), t:x.t }; }
+    if(x.ev||x.det){ const p=x.ev?evOf(x.ev):detOf(x.det); return { date:p.date, src:aOut(p.url,p.src), t:x.t }; }
     const r=relOf(x[0],x[1]); if(!r) throw new Error("数据点库里没有这条发布："+x[0]+" "+x[1]);
     return { date:r.date, src:relLink(x[0],x[1],x[0]==="lmsys"?"LMSYS · "+r.title:null), t:x[2] }; });
   rows.sort((a,b)=>a.date.localeCompare(b.date));

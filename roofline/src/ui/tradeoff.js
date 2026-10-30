@@ -68,16 +68,6 @@ function renderInferTO(){
   lineChart("i-to-ctx",{series:serC,xLog:true,xBase:2,xFmt:fK,xLab:"输入长度（输出 "+fK(osl)+"）",yLab:"@"+TO.target+" tok/s/user 的单卡吞吐",labelEnds:false,empty:"所有配置都达不到这个单用户速度"});
   legendInto("i-to-ctx-legend",serC.map(se=>({name:se.name,col:se.col,line:true})));
   $("i-to-ctx-lede").textContent="每个点是把这个输入长度下的 Pareto 曲线在 "+TO.target+" tok/s/user 处插值（InferenceX 的 iso-interactivity 读法）；断掉的地方是 KV 放不下，或者并发降到 1 也达不到这个速度。上下文变长时两件事同时发生：每个请求的 KV 读取变多（decode 每步变慢），能放下的并发变少（单卡吞吐的上限变低），聚合部署里分摊进来的 prefill 也变重。滑窗、线性注意力、MLA、DCP 压的是前两项，PD 分离把第三项挪到另一组卡上。";
-  /* 随拓扑：同一组配方放到 HGX 64 卡和 NVL72 64 卡 */
-  const pair={B200:"GB200",GB200:"B200",B300:"GB300",GB300:"B300",H200:"GB200"}, nvlNow=/^GB/.test(S.hw), hH=nvlNow?pair[S.hw]:S.hw==="H200"?"B200":S.hw, hN=nvlNow?S.hw:pair[S.hw];
-  const cH=toConfigs("hgx64",hH), cN=toConfigs("nvl64",hN), ids=[...new Set(cH.map(x=>x.id).concat(cN.map(x=>x.id)))];
-  $("i-to-topo").innerHTML='<thead><tr><th>配置</th><th>'+esc(HW[hH].name)+' × 64（8 台 HGX）：卡 / @'+TO.target+'</th><th>'+esc(HW[hN].name)+' × 64（NVL72）：卡 / @'+TO.target+'</th><th>NVL72 / HGX</th><th>差在哪</th></tr></thead><tbody>'+
-    ids.map(id=>{ const a=cH.find(x=>x.id===id), b=cN.find(x=>x.id===id), any=a||b;
-      const va=a?toCurve(a,isl,osl,hH,"hgx64"):null, vb=b?toCurve(b,isl,osl,hN,"nvl64"):null, ia=va&&va.fit?isoThr(va.pts,TO.target):null, ib=vb&&vb.fit?isoThr(vb.pts,TO.target):null;
-      const big=Math.max(any.cfg.N,any.pd?any.pd.N:0);
-      const why=!a?"只在 NVL72 上有这个配方":!b?"只在 HGX 上有这个配方":big>8?"实例 "+big+" 卡：HGX 上要跨 "+Math.ceil(big/8)+" 台机器，层内通信走 IB；NVL72 上全在 NVLink 内":"实例在 8 卡以内，两边都走 NVLink；差别主要是两种卡的峰值和显存";
-      return '<tr><td>'+esc(any.eng+" · "+any.label)+'</td><td class="num">'+(a?a.cfg.N+" / "+(ia!=null?fN(ia):va.fit?"达不到":"放不下"):"—")+'</td><td class="num">'+(b?b.cfg.N+" / "+(ib!=null?fN(ib):vb.fit?"达不到":"放不下"):"—")+'</td><td class="num">'+(ia&&ib?(ib/ia).toFixed(2)+"×":"—")+'</td><td>'+esc(why)+'</td></tr>'; }).join("")+'</tbody>';
-  $("i-to-topo-lede").textContent=(S.hw==="H200"?"H200 没有 NVL72 版本，这里用同一代的 B200 和 GB200 比，只看拓扑的差别。":"")+"同一个模型、同样 64 张卡，分别放成 8 台 "+HW[hH].name+" HGX（机内 NVLink、机间 IB）和一个 "+HW[hN].name+" NVL72（64 卡在一个 NVLink 域）。8 卡以内的实例两边差不多；宽 EP（DEP64、tp = ep = 64、DeepInfer 的 decode）在 HGX 上每层 dispatch / combine 都要过 IB，在 NVL72 上全在 NVLink 内。SemiAnalysis 的 InferenceX 里 GB200 / GB300 对 B200 / B300 的优势也主要出现在这种宽 EP 的点上。";
   /* 怎么选 */
   const di=curves.find(cu=>cu.cf.eng==="DeepInfer"), b1=di&&di.fit?di.pts[0].r:null;
   const diNote = !di ? " dense 模型没有这条路。" : !b1 ? " 这个拓扑 / 卡上它放不下。" : (()=>{ const mm=b1.mem, nonExp=mm.wAttn+mm.wLin+mm.wMoeRep+mm.wDense+mm.wEmb, tW=nonExp/(hw.hbm*1e9*g.etaM);
