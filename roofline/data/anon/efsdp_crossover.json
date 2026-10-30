@@ -1,0 +1,22 @@
+{
+ "title": "EP4 → EP8 的交叉点（等效带宽相同）",
+ "stage": "train",
+ "hw": "H200",
+ "gpus": 8,
+ "topo": "hgx8",
+ "model": "qwen35",
+ "conditions": "由实测的权重 / 激活字节算出：EP 从 4 加到 8 时，expert FSDP 省下的权重字节等于多出来的激活字节的每卡 token 数。跨机两行是假设的 4 + 4 放置。",
+ "dims": [
+  "case"
+ ],
+ "metrics": {
+  "tokens": {
+   "unit": "tok",
+   "label": "交叉点（每卡 token）"
+  }
+ },
+ "points": [
+{"case":"same_node","tokens":204570},
+{"case":"cross_node_dedup","tokens":394593},
+{"case":"cross_node_copies","tokens":148533}
+]}

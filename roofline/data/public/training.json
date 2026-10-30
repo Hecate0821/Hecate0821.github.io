@@ -1,0 +1,6 @@
+[
+ {"id":"mok-vs-deepep-k27-gb300","date":"2026-08","src":"Cursor","hw":"GB300 NVL72","model":"K2.7 形状（Z 384、K 8、D 7168、F 2048）","engine":"Mixture-of-Kittens vs DeepEP","config":"EP64，每卡 2048 token，MXFP8",
+  "value":"一层 MoE：前向最多 2.37×、反向 1.78×；512 张 GB300 端到端 760.9 → 1,070.2 tok/s/GPU（1.41×）",
+  "replay":{"kind":"mok_ratio","n":2048,"K":8,"Z":384,"E":64,"De":7168,"F":2048,"hw":"GB300","topo":"nvl64","prec":"mxfp8"},
+  "m":{"fwd_speedup_max":2.37,"bwd_speedup":1.78,"e2e_speedup":1.41,"tok_s_gpu_deepep":760.9,"tok_s_gpu_mok":1070.2}}
+]

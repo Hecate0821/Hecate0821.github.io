@@ -1,0 +1,71 @@
+{
+ "title": "DeepEP：dispatch + combine 四次交换",
+ "stage": "kernel",
+ "hw": "H200",
+ "gpus": 8,
+ "topo": "hgx8",
+ "model": "qwen35",
+ "conditions": "Qwen3.5 的 MoE 形状（256 expert、top-8、hidden 2048），每卡 seq / 8 个 token，只计 dispatch / combine 前反向四次交换，不含 GEMM。",
+ "dims": [
+  "backend",
+  "ep",
+  "seq"
+ ],
+ "metrics": {
+  "s": {
+   "unit": "s",
+   "label": "四次交换"
+  },
+  "wire_bytes": {
+   "unit": "B",
+   "label": "每卡线上字节"
+  },
+  "remote_copies": {
+   "unit": "",
+   "label": "远端 token 拷贝数"
+  }
+ },
+ "points": [
+{"backend":"deepep_v2","ep":2,"seq":4096,"s":0.000931367,"wire_bytes":8388608,"remote_copies":512},
+{"backend":"deepep_v2","ep":2,"seq":8192,"s":0.00118859,"wire_bytes":16760832,"remote_copies":1023},
+{"backend":"deepep_v2","ep":2,"seq":16384,"s":0.00106829,"wire_bytes":33521664,"remote_copies":2046},
+{"backend":"deepep_v2","ep":2,"seq":32768,"s":0.00121852,"wire_bytes":66863104,"remote_copies":4081},
+{"backend":"deepep_v2","ep":2,"seq":65536,"s":0.0012449,"wire_bytes":133840896,"remote_copies":8169},
+{"backend":"deepep_v2","ep":2,"seq":131072,"s":0.00170506,"wire_bytes":267583488,"remote_copies":16332},
+{"backend":"deepep_v2","ep":2,"seq":262144,"s":0.00280425,"wire_bytes":534904832,"remote_copies":32648},
+{"backend":"deepep_v2","ep":4,"seq":4096,"s":0.00126351,"wire_bytes":22806528,"remote_copies":1392},
+{"backend":"deepep_v2","ep":4,"seq":8192,"s":0.00114887,"wire_bytes":45760512,"remote_copies":2793},
+{"backend":"deepep_v2","ep":4,"seq":16384,"s":0.00116915,"wire_bytes":91029504,"remote_copies":5556},
+{"backend":"deepep_v2","ep":4,"seq":32768,"s":0.00117608,"wire_bytes":180830208,"remote_copies":11037},
+{"backend":"deepep_v2","ep":4,"seq":65536,"s":0.00194094,"wire_bytes":364888064,"remote_copies":22271},
+{"backend":"deepep_v2","ep":4,"seq":131072,"s":0.00341206,"wire_bytes":727416832,"remote_copies":44398},
+{"backend":"deepep_v2","ep":4,"seq":262144,"s":0.00652736,"wire_bytes":1456078848,"remote_copies":88872},
+{"backend":"deepep_v2","ep":8,"seq":4096,"s":0.00126143,"wire_bytes":38649856,"remote_copies":2359},
+{"backend":"deepep_v2","ep":8,"seq":8192,"s":0.00119627,"wire_bytes":78790656,"remote_copies":4809},
+{"backend":"deepep_v2","ep":8,"seq":16384,"s":0.00125928,"wire_bytes":155238400,"remote_copies":9475},
+{"backend":"deepep_v2","ep":8,"seq":32768,"s":0.00177652,"wire_bytes":309149696,"remote_copies":18869},
+{"backend":"deepep_v2","ep":8,"seq":65536,"s":0.00294375,"wire_bytes":622411776,"remote_copies":37989},
+{"backend":"deepep_v2","ep":8,"seq":131072,"s":0.00563538,"wire_bytes":1242660864,"remote_copies":75846},
+{"backend":"deepep_v2","ep":8,"seq":262144,"s":0.0110204,"wire_bytes":2489204736,"remote_copies":151929},
+{"backend":"deepep_legacy","ep":2,"seq":4096,"s":0.00113026,"wire_bytes":8388608,"remote_copies":512},
+{"backend":"deepep_legacy","ep":2,"seq":8192,"s":0.000950992,"wire_bytes":16760832,"remote_copies":1023},
+{"backend":"deepep_legacy","ep":2,"seq":16384,"s":0.00121604,"wire_bytes":33521664,"remote_copies":2046},
+{"backend":"deepep_legacy","ep":2,"seq":32768,"s":0.00150694,"wire_bytes":66863104,"remote_copies":4081},
+{"backend":"deepep_legacy","ep":2,"seq":65536,"s":0.00163752,"wire_bytes":133840896,"remote_copies":8169},
+{"backend":"deepep_legacy","ep":2,"seq":131072,"s":0.00304195,"wire_bytes":267583488,"remote_copies":16332},
+{"backend":"deepep_legacy","ep":2,"seq":262144,"s":0.00574405,"wire_bytes":534904832,"remote_copies":32648},
+{"backend":"deepep_legacy","ep":4,"seq":4096,"s":0.00102303,"wire_bytes":22806528,"remote_copies":1392},
+{"backend":"deepep_legacy","ep":4,"seq":8192,"s":0.00111443,"wire_bytes":45760512,"remote_copies":2793},
+{"backend":"deepep_legacy","ep":4,"seq":16384,"s":0.00130992,"wire_bytes":91029504,"remote_copies":5556},
+{"backend":"deepep_legacy","ep":4,"seq":32768,"s":0.00150419,"wire_bytes":180830208,"remote_copies":11037},
+{"backend":"deepep_legacy","ep":4,"seq":65536,"s":0.00212971,"wire_bytes":364888064,"remote_copies":22271},
+{"backend":"deepep_legacy","ep":4,"seq":131072,"s":0.00390997,"wire_bytes":727416832,"remote_copies":44398},
+{"backend":"deepep_legacy","ep":4,"seq":262144,"s":0.00763711,"wire_bytes":1456078848,"remote_copies":88872},
+{"backend":"deepep_legacy","ep":8,"seq":4096,"s":0.0011617,"wire_bytes":38649856,"remote_copies":2359},
+{"backend":"deepep_legacy","ep":8,"seq":8192,"s":0.0013531,"wire_bytes":78790656,"remote_copies":4809},
+{"backend":"deepep_legacy","ep":8,"seq":16384,"s":0.00143869,"wire_bytes":155238400,"remote_copies":9475},
+{"backend":"deepep_legacy","ep":8,"seq":32768,"s":0.00157747,"wire_bytes":309149696,"remote_copies":18869},
+{"backend":"deepep_legacy","ep":8,"seq":65536,"s":0.00260784,"wire_bytes":622411776,"remote_copies":37989},
+{"backend":"deepep_legacy","ep":8,"seq":131072,"s":0.00495689,"wire_bytes":1242660864,"remote_copies":75846},
+{"backend":"deepep_legacy","ep":8,"seq":262144,"s":0.00949119,"wire_bytes":2489204736,"remote_copies":151929}
+]}

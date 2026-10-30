@@ -1,0 +1,892 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MoE 训推 Roofline 实验台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo:wght@500;700;800&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="css/roofline.css">
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <span class="eyebrow">MoE · post-training × inference × RL · roofline</span>
+  <h1>MoE 训推 Roofline 实验台</h1>
+  <p>同一个 MoE 模型，后训练、推理和 RL rollout 发出的 kernel 几乎没有重合，所以这里各用各的算子图：推理按 SGLang / vLLM / TokenSpeed（以及 torchtitan 的 TitanRL generator）真正发出的 kernel 序列建模，后训练按 Megatron-Core 和 torchtitan 的 fwd / dgrad / wgrad、重算、通信和优化器建模。并行和低精度不单独成页，跟着场景走：训练的 FSDP / CP / EP 放在后训练里，推理的 TP / DP-attention / EP 和投机解码放在推理里，两边的量化各自放进对应的页；RL 一页讲训推不一致、低精度 rollout 和 QAT。所有数字都由同一套核心现场算出，再和公开数据、匿名实测对照。</p>
+</header>
+<nav class="tabs" aria-label="页面">
+  <a href="#overview" data-tab="overview">总览</a>
+  <a href="#train/step" data-tab="train">后训练</a>
+  <a href="#infer/step" data-tab="infer">推理</a>
+  <a href="#rl/mismatch" data-tab="rl">RL</a>
+  <a href="#appendix/data" data-tab="appendix">附录</a>
+</nav>
+<nav class="subtabs" data-page="train" aria-label="后训练" hidden>
+  <a href="#train/step" data-sub="step">一个 step</a><a href="#train/par" data-sub="par">并行：FSDP / CP / EP</a><a href="#train/quant" data-sub="quant">低精度训练</a><a href="#train/calib" data-sub="calib">和实测对照</a>
+</nav>
+<nav class="subtabs" data-page="infer" aria-label="推理" hidden>
+  <a href="#infer/step" data-sub="step">一步 decode / prefill</a><a href="#infer/deploy" data-sub="deploy">部署与并行</a><a href="#infer/quant" data-sub="quant">低精度推理</a><a href="#infer/spec" data-sub="spec">投机解码</a>
+</nav>
+<nav class="subtabs" data-page="rl" aria-label="RL" hidden>
+  <a href="#rl/mismatch" data-sub="mismatch">训推不一致</a><a href="#rl/lowprec" data-sub="lowprec">低精度 rollout</a><a href="#rl/qat" data-sub="qat">QAT 与反向精度</a>
+</nav>
+<nav class="subtabs" data-page="appendix" aria-label="附录" hidden>
+  <a href="#appendix/data" data-sub="data">数据与发布</a><a href="#appendix/quant" data-sub="quant">量化基础</a><a href="#appendix/models" data-sub="models">模型结构</a><a href="#appendix/method" data-sub="method">口径与参考</a>
+</nav>
+
+<div class="layout">
+<aside class="rack" aria-label="参数">
+  <h3>全局</h3>
+  <label class="ctl"><span>模型</span></label>
+  <select id="g-model" class="full" aria-label="模型"></select>
+  <label class="ctl"><span>GPU</span><select id="g-hw" aria-label="GPU"></select></label>
+  <label class="ctl"><span>拓扑</span></label>
+  <select id="g-topo" class="full" aria-label="拓扑"></select>
+  <div class="warnbox" id="g-warn" hidden></div>
+  <details class="adv"><summary>效率系数与固定开销（各页共用）</summary>
+    <label class="ctl"><span>GEMM 可达算力比例 η<sub>c</sub></span><input type="number" step="0.05" min="0.1" max="1" data-bind="glob.etaC"></label>
+    <label class="ctl"><span>HBM 可达带宽比例 η<sub>m</sub></span><input type="number" step="0.05" min="0.1" max="1" data-bind="glob.etaM"></label>
+    <label class="ctl"><span>通信可达带宽比例 η<sub>n</sub></span><input type="number" step="0.05" min="0.1" max="1" data-bind="glob.etaN"></label>
+    <label class="ctl"><span>NVLink 集合通信延迟 <small>µs</small></span><input type="number" step="1" min="0" data-bind="glob.alphaNv"></label>
+    <label class="ctl"><span>IB 集合通信延迟 <small>µs</small></span><input type="number" step="1" min="0" data-bind="glob.alphaIb"></label>
+    <label class="ctl"><span>单个 kernel 最短时间 <small>µs</small></span><input type="number" step="0.5" min="0" data-bind="glob.kernelUs"></label>
+    <h3>只影响推理</h3>
+    <label class="ctl"><span>eager 时每个 kernel 的 CPU launch <small>µs</small></span><input type="number" step="0.5" min="0" data-bind="glob.launchUs"></label>
+    <label class="ctl"><span>一次 graph replay <small>µs</small></span><input type="number" step="1" min="0" data-bind="glob.graphLaunchUs"></label>
+    <label class="ctl"><span>vLLM DP 每步同步 <small>µs</small></span><input type="number" step="10" min="0" data-bind="glob.dpSyncUs"></label>
+    <label class="ctl"><span>DeepEP low-latency 固定延迟 <small>µs</small></span><input type="number" step="1" min="0" data-bind="glob.a2aLLus"></label>
+    <label class="ctl"><span>all-gather / reduce-scatter 可达带宽比例</span><input type="number" step="0.02" min="0.1" max="1" data-bind="glob.etaAg"></label>
+    <label class="ctl"><span>DeepEP 每次交换的固定开销 <small>µs</small></span><input type="number" step="1" min="0" data-bind="glob.deepepUs"></label>
+    <label class="ctl"><span>对称显存 barrier <small>µs</small></span><input type="number" step="1" min="0" data-bind="glob.barrierUs"></label>
+    <p class="hint">η<sub>n</sub>=0.7 参考：TRT-LLM 在 NVL72 上 a2a 达到峰值约 80%，8 卡 NVSwitch 上 NCCL a2a 约 550/900 GB/s。</p>
+  </details>
+
+  <!-- 模型 -->
+  <div data-rack="appendix/models">
+    <h3>改模型参数（当前预设的副本）</h3>
+    <div id="model-editor"></div>
+    <button type="button" id="model-reset">恢复预设值</button>
+  </div>
+
+  <!-- 推理 -->
+  <div data-rack="infer/step infer/deploy infer/spec">
+    <h3>推理引擎</h3>
+    <select data-bind="inf.engine" class="full" aria-label="推理引擎">
+      <option value="sglang">SGLang</option>
+      <option value="vllm">vLLM</option>
+      <option value="tokenspeed">TokenSpeed</option>
+      <option value="titan">TorchTitan TitanRL generator（vLLM 跑 torchtitan 模型）</option></select>
+    <p class="hint" id="i-engine-note"></p>
+    <h3>部署预设</h3>
+    <select id="i-preset" class="full" aria-label="推理部署预设"></select>
+    <p class="hint" id="i-preset-src"></p>
+    <label class="ctl"><span>阶段</span><select data-bind="inf.phase" aria-label="阶段"><option value="decode">decode</option><option value="prefill">prefill</option></select></label>
+    <label class="ctl"><span>一个实例的 GPU 数 N <small>tp-size</small></span><input type="number" min="1" step="1" data-bind="inf.N"></label>
+    <label class="ctl"><span>attention DP <small>dp-size</small></span><input type="number" min="1" step="1" data-bind="inf.dpA"></label>
+    <label class="ctl"><span>MoE 并行</span></label>
+    <select id="i-moepar" class="full" data-bind="inf.moePar" aria-label="MoE 并行"></select>
+    <div data-phase="decode">
+      <label class="ctl"><span>每个 DP rank 的并发请求 B</span><output data-out="inf.B"></output><input type="range" min="1" max="1024" step="1" data-bind="inf.B"></label>
+      <label class="ctl"><span>上下文长度 n <small>token</small></span><output data-out="inf.n"></output><input type="range" min="0" max="262144" step="256" data-bind="inf.n"></label>
+      <label class="ctl"><span>投机方法</span><select data-bind="inf.specMethod" aria-label="投机方法"><option value="mtp">MTP（模型自带）</option><option value="eagle3">EAGLE-3</option><option value="dflash">DFlash</option><option value="dspark">DSpark</option></select></label>
+      <label class="ctl"><span>投机 draft token 数 k <small>0 = 关</small></span><input type="number" min="0" max="15" step="1" data-bind="inf.specK"></label>
+      <label class="ctl"><span>每步平均多接受的 token</span><input type="number" min="0" max="15" step="0.1" data-bind="inf.accept"></label>
+    </div>
+    <div data-phase="prefill">
+      <label class="ctl"><span>prompt 长度 P</span><output data-out="inf.P"></output><input type="range" min="1024" max="262144" step="1024" data-bind="inf.P"></label>
+      <label class="ctl"><span>chunk 大小 <small>chunked_prefill_size</small></span><input type="number" min="256" step="256" data-bind="inf.C"></label>
+    </div>
+    <label class="ctl"><span>routed expert 权重</span><select data-bind="inf.wDt" aria-label="expert 精度"><option value="bf16">BF16</option><option value="fp8">FP8 block</option><option value="mxfp8">MXFP8</option><option value="mxfp4">MXFP4</option><option value="nvfp4">NVFP4</option></select></label>
+    <label class="ctl"><span>expert 激活</span><select data-bind="inf.eAct" aria-label="expert 激活精度"><option value="">与权重相同（WxAx）</option><option value="bf16">BF16（W4A16 / W8A16）</option><option value="mxfp8">MXFP8（W4A8）</option></select></label>
+    <label class="ctl"><span>其余权重</span><select data-bind="inf.dDt" aria-label="dense 精度"><option value="bf16">BF16</option><option value="fp8">FP8 block</option><option value="mxfp8">MXFP8</option></select></label>
+    <label class="ctl"><span>KV cache</span><select data-bind="inf.kvDt" aria-label="KV 精度"><option value="bf16">BF16</option><option value="fp8">FP8</option></select></label>
+    <label class="ctl"><span>线性注意力状态</span><select data-bind="inf.stateDt" aria-label="状态精度"><option value="fp32">FP32</option><option value="bf16">BF16</option></select></label>
+    <label class="check"><input type="checkbox" data-bind="inf.graph"><span>CUDA graph（关掉 = 全 eager）</span></label>
+    <label class="check"><input type="checkbox" data-bind="inf.tbo"><span>two-batch overlap（只影响 a2a 类 MoE 通信）</span></label>
+    <div data-eng="titan">
+      <label class="check"><input type="checkbox" data-bind="inf.bi"><span>batch-invariant 模式（训推 log-prob 逐位一致）</span></label>
+      <label class="ctl"><span>batch-invariant 变慢倍数</span><input type="number" step="0.1" min="1" data-bind="inf.biFactor"></label>
+      <label class="ctl"><span>相对原生模型的实现效率</span><input type="number" step="0.05" min="0.1" max="1.5" data-bind="inf.implEff"></label>
+    </div>
+    <details class="adv"><summary>更多</summary>
+      <label class="check"><input type="checkbox" data-bind="inf.dispFp8"><span>DeepEP dispatch 用 FP8</span></label>
+      <label class="check"><input type="checkbox" data-bind="inf.prefixCache"><span>prefix cache（SGLang 多留一个状态槽）</span></label>
+      <label class="ctl"><span>DCP（MLA latent KV 切分）</span><input type="number" step="1" min="1" data-bind="inf.dcp"></label>
+      <label class="ctl"><span>冗余 expert 数（EPLB）</span><input type="number" step="1" min="0" data-bind="inf.redundant"></label>
+      <label class="ctl"><span>expert 负载不均系数</span><input type="number" step="0.05" min="1" data-bind="inf.imb"></label>
+      <label class="ctl"><span>可用显存比例 <small>mem_fraction</small></span><input type="number" step="0.01" min="0.3" max="0.98" data-bind="inf.memFrac"></label>
+      <label class="ctl"><span>激活与 workspace 预留 <small>GB</small></span><input type="number" step="1" min="0" data-bind="inf.reserveGB"></label>
+      <label class="ctl"><span>torch a2a 的 D2H 同步 <small>µs</small></span><input type="number" step="5" min="0" data-bind="inf.hostSyncUs"></label>
+    </details>
+  </div>
+
+  <!-- 训练 -->
+  <div data-rack="train/step train/par">
+    <h3>训练框架</h3>
+    <select data-bind="trn.fw" class="full" aria-label="训练框架">
+      <option value="megatron">Megatron-Core（slime / miles 的默认后端）</option>
+      <option value="torchtitan">torchtitan（FSDP2 + TP + CP + EP）</option></select>
+    <h3>配方预设</h3>
+    <select id="t-preset" class="full" aria-label="训练配方预设"></select>
+    <p class="hint" id="t-preset-src"></p>
+    <label class="ctl"><span>TP <small data-fw="megatron">+ SP</small></span><input type="number" min="1" step="1" data-bind="trn.tp"></label>
+    <label class="ctl"><span>CP</span><input type="number" min="1" step="1" data-bind="trn.cp"></label>
+    <label class="ctl"><span>PP</span><input type="number" min="1" step="1" data-bind="trn.pp"></label>
+    <label class="ctl"><span>virtual PP</span><input type="number" min="1" step="1" data-bind="trn.vpp"></label>
+    <label class="ctl"><span>EP</span><input type="number" min="1" step="1" data-bind="trn.ep"></label>
+    <label class="ctl" data-fw="megatron"><span>ETP <small>expert TP</small></span><input type="number" min="1" step="1" data-bind="trn.etp"></label>
+    <label class="ctl"><span>EP 通信</span></label><select id="t-disp" class="full" data-bind="trn.dispatcher" aria-label="EP 通信"></select>
+    <label class="ctl"><span>全注意力 CP</span></label><select id="t-cptype" class="full" data-bind="trn.cpType" aria-label="全注意力 CP"></select>
+    <label class="ctl"><span>线性注意力 CP</span></label><select id="t-lincp" class="full" data-bind="trn.linCP" aria-label="线性注意力 CP"></select>
+    <label class="ctl"><span>每卡每 micro-batch token <small>max_tokens_per_gpu</small></span><output data-out="trn.tok"></output><input type="range" min="512" max="65536" step="512" data-bind="trn.tok"></label>
+    <label class="ctl"><span>平均序列长度 S</span><input type="number" min="256" step="256" data-bind="trn.S"></label>
+    <label class="ctl"><span>每个 optimizer step 的 token</span><input type="number" min="1024" step="65536" data-bind="trn.Gtok"></label>
+    <label class="ctl"><span>GEMM 精度 <small>作用于所有 GEMM</small></span><select data-bind="trn.prec" aria-label="训练精度"><option value="bf16">BF16</option><option value="fp8">block FP8</option><option value="mxfp8">MXFP8</option><option value="mxfp8hp">MXFP8 前向 + BF16 反向</option><option value="nvfp4">NVFP4</option><option value="nvfp4hp">NVFP4 前向 + BF16 反向</option></select></label>
+    <p class="hint">逐个 GEMM 的量化开销和转置副本见<a href="#train/quant">低精度训练</a>，反向精度见 <a href="#rl/qat">RL · QAT</a>。</p>
+    <label class="ctl"><span>重算</span><select id="t-rc" data-bind="trn.recompute" aria-label="重算"></select></label>
+    <div id="t-rcmods" data-fw="megatron"></div>
+    <label class="check"><input type="checkbox" data-bind="trn.offload"><span>optimizer 放 CPU（CPU Adam）</span></label>
+    <label class="check" data-fw="megatron"><input type="checkbox" data-bind="trn.overlapOffload"><span>CPU Adam 的 D2H / H2D 与计算重叠</span></label>
+    <label class="check" data-fw="megatron"><input type="checkbox" data-bind="trn.overlapGrad"><span>梯度 reduce-scatter 与反向重叠 <small>--overlap-grad-reduce</small></span></label>
+    <label class="check" data-fw="megatron"><input type="checkbox" data-bind="trn.overlapParam"><span>参数 all-gather 与前向重叠 <small>--overlap-param-gather</small></span></label>
+    <label class="check" data-fw="megatron"><input type="checkbox" data-bind="trn.epOverlap"><span>EP a2a 与另一个 micro-batch 的计算重叠 <small>--overlap-moe-expert-parallel-comm</small></span></label>
+    <label class="check" data-fw="megatron"><input type="checkbox" data-bind="trn.sharedOverlap"><span>shared expert 与 a2a 重叠 <small>--moe-shared-expert-overlap</small></span></label>
+    <label class="check"><input type="checkbox" data-bind="trn.tpOverlap"><span>TP 通信重叠 <small data-fw="megatron">--tp-comm-overlap</small><small data-fw="torchtitan">async TP</small></span></label>
+    <label class="check" data-fw="torchtitan"><input type="checkbox" data-bind="trn.reshard"><span>reshard_after_forward（反向再 all-gather 一次参数）</span></label>
+    <label class="check" data-fw="torchtitan"><input type="checkbox" data-bind="trn.cpLB"><span>CP causal 负载均衡（首尾配对切分）</span></label>
+    <p class="hint">每一维怎么切、字节怎么算，见<a href="#train/par">后训练 · 并行</a>。</p>
+    <details class="adv"><summary>更多</summary>
+      <label class="ctl"><span>expert 负载不均系数</span><input type="number" step="0.05" min="1" data-bind="trn.imb"></label>
+      <label class="ctl"><span>CPU Adam 吞吐 <small>GB/s</small></span><input type="number" step="5" min="1" data-bind="trn.cpuAdamGBs"></label>
+      <label class="ctl"><span>EP 计数的 D2H 同步 <small>µs</small></span><input type="number" step="5" min="0" data-bind="trn.hostSyncUs"></label>
+      <label class="ctl"><span>workspace <small>GB</small></span><input type="number" step="1" min="0" data-bind="trn.workspaceGB"></label>
+      <label class="ctl" data-fw="torchtitan"><span>HSDP 副本数 R</span><input type="number" min="1" step="1" data-bind="trn.hsdp"></label>
+      <label class="ctl" data-fw="torchtitan"><span>FSDP 梯度 reduce-scatter 精度</span><select data-bind="trn.gradDt" aria-label="梯度精度"><option value="fp32">FP32</option><option value="bf16">BF16</option></select></label>
+      <label class="ctl"><span>注意力核心可达比例 <small>0 = 用 η<sub>c</sub></small></span><input type="number" step="0.02" min="0" max="1" data-bind="trn.etaA"></label>
+      <label class="ctl" data-fw="torchtitan"><span>MoK 通信 SM 比例 f</span><input type="number" step="0.05" min="0.05" max="0.6" data-bind="trn.mokF"></label>
+    </details>
+  </div>
+
+  <!-- 低精度：按页面拆开 -->
+  <div data-rack="infer/quant train/quant rl/lowprec rl/qat">
+    <h3>低精度：硬件（只算 Blackwell）</h3>
+    <select data-bind="q.hw" class="full" aria-label="低精度用的硬件">
+      <option value="B200">B200（HGX，8 卡 NVLink 域）</option>
+      <option value="B300">B300（HGX，FP4 ×1.5，288 GB）</option>
+      <option value="GB200">GB200（NVL72，BF16 2.5 / FP8 5 PF）</option>
+      <option value="GB300">GB300（NVL72，FP4 15 PF，288 GB）</option></select>
+    <p class="hint" id="q-hw-note"></p>
+  </div>
+  <div data-rack="infer/quant">
+    <h3>推理方案</h3>
+    <select data-bind="q.scheme" class="full" aria-label="推理量化方案" id="q-scheme"></select>
+    <label class="ctl"><span>激活量化</span><select data-bind="q.fuse" aria-label="激活量化方式"><option value="fused">融合进上一个算子</option><option value="separate">单独一个 kernel</option></select></label>
+  </div>
+  <div data-rack="infer/quant train/quant rl/qat">
+    <h3>GEMM 形状</h3>
+    <select data-bind="q.shape" class="full" aria-label="GEMM 形状">
+      <option value="up">routed expert gate_up（N = 2F，K = D）</option>
+      <option value="down">routed expert down（N = D，K = F）</option>
+      <option value="shared">shared expert / dense FFN gate_up</option>
+      <option value="custom">自定义</option></select>
+    <label class="ctl"><span>N <small>输出维</small></span><input type="number" min="16" step="16" data-bind="q.N"></label>
+    <label class="ctl"><span>K <small>收缩维</small></span><input type="number" min="16" step="16" data-bind="q.K"></label>
+  </div>
+  <div data-rack="infer/quant">
+    <label class="ctl"><span>M <small>这个 GEMM 的行数</small></span><input type="number" min="1" step="1" data-bind="q.M"></label>
+    <h3>MoE 层</h3>
+    <label class="ctl"><span>这一层看到的 token T <small>整个 EP 组</small></span><input type="number" min="1" step="64" data-bind="q.T"></label>
+    <label class="ctl"><span>EP</span><input type="number" min="1" step="1" data-bind="q.ep"></label>
+    <label class="ctl"><span>每 expert 行数对齐</span><select data-bind="q.align" aria-label="对齐"><option value="auto">auto（随 λ 选 tile）</option><option value="1">1：不补齐</option><option value="16">16（FP8 训练）</option><option value="32">32（MX / FP4 训练）</option><option value="64">64</option><option value="128">128（DeepGEMM contiguous）</option></select></label>
+    <details class="adv"><summary>更多</summary>
+      <label class="ctl"><span>W4A16 反量化吞吐 <small>T 元素/s</small></span><input type="number" min="1" step="5" data-bind="q.deqRate"></label>
+      <label class="ctl"><span>CTA 行数 BM <small>W4A16 每 BM 行反量化一遍权重</small></span><input type="number" min="16" step="16" data-bind="q.BM"></label>
+      <p class="hint">反量化吞吐没有公开实测，按 CUDA core 整数 / 查表转换的量级取值，只影响 W4A16 在大 M 时比 BF16 慢多少。</p>
+    </details>
+  </div>
+  <div data-rack="train/quant rl/qat">
+    <h3>训练</h3>
+    <select data-bind="q.recipe" class="full" aria-label="训练配方" id="q-recipe"></select>
+    <label class="ctl"><span>每 expert 每 micro-batch 行数 M</span><input type="number" min="16" step="256" data-bind="q.Mt"></label>
+    <label class="ctl"><span>每个 step 的 micro-batch 数</span><input type="number" min="1" step="1" data-bind="q.nMicro"></label>
+    <label class="check"><input type="checkbox" data-bind="q.tokFused"><span>按 token 的 FP32 scale 融进 GEMM epilogue（cuDNN frontend 已有 kernel，TE 尚未接入）</span></label>
+  </div>
+  <div data-rack="rl/lowprec">
+    <h3>RL</h3>
+    <label class="ctl"><span>BF16 时 rollout 占 step 的比例</span><input type="number" min="0" max="1" step="0.05" data-bind="q.roll"></label>
+  </div>
+
+  <div data-rack="overview"><p class="hint">总览照搬推理页和后训练页的当前配置；要改配置，去对应的页。</p></div>
+  <div data-rack="train/calib"><p class="hint">这一节没有自己的参数：匿名实测的设置原样代入后训练核心，只跟随上面的效率系数。</p></div>
+  <div data-rack="rl/mismatch"><p class="hint">这一页只用全局的模型；每条序列的长度取后训练页的平均序列长度 S。</p></div>
+  <div data-rack="appendix/data"><p class="hint">这一页只列公开数字和发布摘要。“本页模型”和“本页”两列按低精度一节的硬件和效率系数的当前值现场算。</p></div>
+  <div data-rack="appendix/quant"><p class="hint">格式表最后一列按当前模型算。</p></div>
+  <div data-rack="appendix/method"><p class="hint">这一页只有说明，没有参数。</p></div>
+</aside>
+
+<main>
+<!-- ============ 总览 ============ -->
+<section class="pane" data-pane="overview" hidden>
+  <div class="block"><h2>五页各管什么</h2>
+    <p class="lede">后训练、推理和 RL 用的是同一个模型，但发出的 kernel、并行方式和精度选择都不一样，所以分开建模，只共用模型结构、硬件表和效率系数。并行和低精度跟着场景走：训练的 FSDP / CP / EP 和推理的 TP / DP-attention / EP 是两回事，放在各自的页里。</p>
+    <div class="cards">
+      <a class="card" href="#train/step"><h4>后训练</h4><p>Megatron-Core / torchtitan 的一个 optimizer step：fwd / dgrad / wgrad、重算、TP / CP / EP / PP / FSDP 通信、优化器和显存。并行一节把 FSDP、CP、EP 一维一维拆开，低精度一节看训练三遍 GEMM，最后和匿名实测对照。</p></a>
+      <a class="card" href="#infer/step"><h4>推理</h4><p>SGLang / vLLM / TokenSpeed 一步 decode 或 prefill 的 kernel 序列；部署一节比较 TP、DP-attention、EP 和 PD 分离的取舍；低精度一节看一个 GEMM 和一层 MoE；投机解码单独一节。</p></a>
+      <a class="card" href="#rl/mismatch"><h4>RL</h4><p>rollout 和训练是两套 kernel，log-prob 对不上：差异从哪来、怎么修（TIS / MIS、routing replay、逐位对齐）；低精度 rollout 和权重同步；QAT 和反向精度。</p></a>
+      <a class="card" href="#appendix/data"><h4>附录</h4><p>公开数据点，过去一年 LMSYS 博客和 SGLang / vLLM / slime / Miles / AReaL 发布的摘要；量化基础；模型结构；建模口径和参考的开源实现。</p></a>
+    </div>
+  </div>
+  <div class="block"><h2>当前配置：推理一步和训练一步</h2>
+    <p class="lede" id="o-lede"></p>
+    <div class="kpis" id="o-kpis"></div>
+    <div class="tbl"><table id="o-cmp"></table></div>
+  </div>
+  <div class="block"><h2>时间花在哪里</h2>
+    <p class="lede">两边按同样的类别归并：全注意力、线性注意力、MoE / FFN、lm_head（训练含 CE）、没藏住的通信、其他（norm、launch、优化器以外的杂项）。推理是一次 decode，训练是每个 PP stage 的一个 micro-batch（fwd + bwd）。</p>
+    <h3>推理：一步 decode</h3>
+    <div class="bar" id="o-ibar"></div><div class="barlist" id="o-ibarlist"></div>
+    <h3>后训练：一个 micro-batch</h3>
+    <div class="bar" id="o-tbar"></div><div class="barlist" id="o-tbarlist"></div>
+  </div>
+  <div class="block"><h2>读数</h2><div id="o-notes"></div></div>
+</section>
+
+<!-- ============ 后训练 · 一个 step ============ -->
+<section class="pane" data-pane="train/step" hidden>
+  <div class="block"><h2>当前配置的一个 optimizer step</h2>
+    <p class="lede" id="t-lede"></p>
+    <div class="kpis" id="t-kpis"></div>
+  </div>
+  <div class="block"><h2>一个 micro-batch（每个 PP stage）</h2>
+    <p class="lede">每个算子拆成前向、反向对输入（dgrad）、反向对权重（wgrad）三遍，打开重算的算子在反向前再跑一遍前向。通信按并行维度分组，只记没藏住的部分：EP a2a 和 Dist-MoE 融合时藏在 expert GEMM 后面，CP ring 藏在注意力后面，勾了重叠的按 85% 能藏计。</p>
+    <div class="bar" id="t-bar"></div>
+    <div class="barlist" id="t-barlist"></div>
+  </div>
+  <div class="block"><h2>一个 step</h2>
+    <p class="lede" id="t-step-lede"></p>
+    <div class="bar" id="t-sbar"></div>
+    <div class="barlist" id="t-sbarlist"></div>
+  </div>
+  <div class="block"><h2>网格：每张卡属于哪几个组</h2>
+    <p class="lede">按 mesh 顺序排 rank：TP 在最内层，然后是 CP；EP 从 dp_shard × cp 里借（torchtitan）或在 DP 里切（Megatron）；expert FSDP 是同一个副本里间隔 EP 的那些卡。虚线框是一个 NVLink 域。点任意一张卡，看它在当前维度上的同组成员；组跨出虚线框，这一维的通信就要走 IB。</p>
+    <div class="seg" id="t-mesh-dim" role="group" aria-label="着色维度"></div>
+    <div class="fig"><div class="mesh" id="t-mesh"></div><div class="cap" id="t-mesh-cap"></div></div>
+    <div class="tbl"><table id="t-groups"></table></div>
+  </div>
+  <div class="block"><h2>一层的时间线</h2>
+    <p class="lede" id="t-gantt-lede"></p>
+    <div class="fig"><svg id="t-gantt" viewBox="0 0 680 200" role="img" aria-label="一层的前向和反向时间线"></svg><div class="legend" id="t-gantt-legend"></div></div>
+  </div>
+  <div class="block"><h2>逐算子：fwd / dgrad / wgrad</h2>
+    <div class="tbl"><table id="t-ops"></table></div>
+  </div>
+  <div class="block"><h2>三遍各自的 roofline</h2>
+    <p class="lede">圆点是前向，方块是 dgrad，三角是 wgrad。wgrad 要把梯度累加进 FP32 main_grad，字节比前向多；线性注意力和注意力核心的反向 FLOPs 是前向的 2.5~2.7 倍。</p>
+    <div class="fig"><svg id="t-roof" viewBox="0 0 680 380" role="img" aria-label="训练 roofline"></svg>
+      <div class="legend" id="t-roof-legend"></div></div>
+  </div>
+  <div class="block"><h2>通信</h2>
+    <div class="tbl"><table id="t-comm"></table></div>
+  </div>
+  <div class="block"><h2>每卡 token 变多时</h2>
+    <p class="lede">参数与梯度的同步每个 step 固定，计算随 token 线性增长，所以 token 越多越容易藏住；EP a2a 和计算都随 token 线性增长，比例不变。显存是上限。</p>
+    <div class="figs">
+      <div class="fig"><svg id="t-sw-thr" viewBox="0 0 680 340" role="img" aria-label="训练吞吐随 token"></svg></div>
+      <div class="fig"><svg id="t-sw-mem" viewBox="0 0 680 340" role="img" aria-label="训练显存随 token"></svg></div>
+    </div>
+    <div class="legend" id="t-sw-legend"></div>
+  </div>
+  <div class="block"><h2>显存</h2>
+    <div class="bar" id="t-mem"></div><div class="barlist" id="t-memlist"></div>
+  </div>
+  <div class="block"><h2>Megatron 和 torchtitan 在这里的差别</h2>
+    <div class="tbl"><table id="t-diff"></table></div>
+  </div>
+  <div class="block"><h2>解析</h2><div id="t-analysis"></div></div>
+</section>
+
+<!-- ============ 后训练 · 并行 ============ -->
+<section class="pane" data-pane="train/par" hidden>
+  <div class="block"><h2>训练的并行：FSDP、CP、EP 一维一维拆开</h2>
+    <p class="lede" id="p-lede"></p>
+    <nav class="subnav" aria-label="并行维度">
+      <a href="#train/par/fsdp">FSDP</a><a href="#train/par/cp">CP：Ring / AllGather / Ulysses</a><a href="#train/par/ep">EP：五个后端</a><a href="#train/calib">和实测对照</a><a href="#infer/deploy">推理的并行在这里</a>
+    </nav>
+    <div class="kpis" id="p-kpis"></div>
+  </div>
+  <div class="block"><h2>三条屋顶线</h2>
+    <p class="lede">同一张图上画三条屋顶：HBM（算子的 FLOP / HBM 字节）、NVLink 和 IB（一段通信期间能拿来盖它的计算 FLOP / 线上字节）。实心点是计算算子，空心菱形是通信，编号对应图例。通信点落在自己那条链路屋顶的斜线段上，说明这段通信期间没有足够的计算去盖它；落在平顶段，就能被完全藏住（前提是实现真的做了重叠）。</p>
+    <div class="fig"><svg id="p-roof" viewBox="0 0 680 360" role="img" aria-label="HBM、NVLink、IB 三条屋顶线"></svg><div class="legend" id="p-roof-legend"></div></div>
+  </div>
+  <div class="block"><h2>相图：序列长度 × 并行度，谁最快</h2>
+    <p class="lede">其他设置保持左侧的当前值，每个 micro-batch 一篇文档（每卡 token = S / CP），只扫序列长度和一个并行度。每格的颜色是最快的后端 / 方法，数字是它的单卡 token/s；斜线格是显存放不下或者组合不合法。悬停看每个候选的数。</p>
+    <div class="figs">
+      <div class="fig"><svg id="p-heat-ep" viewBox="0 0 680 330" role="img" aria-label="EP 度 × 序列长度的最快 EP 后端"></svg><div class="legend" id="p-heat-ep-legend"></div></div>
+      <div class="fig"><svg id="p-heat-cp" viewBox="0 0 680 330" role="img" aria-label="CP 度 × 序列长度的最快 CP 方法"></svg><div class="legend" id="p-heat-cp-legend"></div></div>
+    </div>
+  </div>
+  <div class="block" id="par-fsdp"><h2>FSDP：切的是参数、梯度和优化器状态</h2>
+    <p>FSDP（ZeRO-3）把每层的参数平均切成 F 份，每张卡常驻 1/F。前向到这一层之前先 all-gather 出完整的 BF16 权重，用完就扔（reshard_after_forward）；反向再 all-gather 一次，算出完整梯度后 reduce-scatter，每张卡只留自己那份梯度，再在本地对自己那份做 Adam。通信量和 token 数无关，只和参数量有关；能不能藏住，取决于这一层的计算够不够长。</p>
+    <div class="formula" id="p-f-formula"></div>
+    <div class="fig"><svg id="p-f-flow" viewBox="0 0 680 250" role="img" aria-label="FSDP 一层的数据流"></svg></div>
+    <ul class="tight">
+      <li><b>dense FSDP 和 CP 共用一个分片维度。</b>torchtitan 把 dense 参数切在 <code>dp_shard × cp</code> 上，所以开 CP 不减少分片数。</li>
+      <li><b>expert FSDP 是单独的一维。</b>EP 从 <code>dp_shard × cp × tp</code> 里借走 E，剩下的是 expert 的 FSDP 度（<code>edp_shard</code>）。EP 越大，expert 每张卡持有的越多、需要 gather 的越少；EP 用满时 expert FSDP 消失。</li>
+      <li><b>HSDP。</b>R &gt; 1 时副本之间每步做一次梯度 all-reduce（2(R−1)/R × 本卡分片字节），把 all-gather 限制在 1/R 的卡内。分片组放进一个 NVLink 域，跨机就只剩每步一次的 all-reduce。左侧“更多”里的“HSDP 副本数”改的就是它。</li>
+      <li><b>reshard_after_forward。</b>关掉它，前向 gather 的权重留到反向，省掉一次 all-gather（字节从 3 份变 2 份），代价是整个模型的 BF16 权重常驻。</li>
+      <li><b>Megatron 没有这一维。</b>它的分布式优化器只切 optimizer 状态，梯度 reduce-scatter 和参数 all-gather 每个 step 只做一次，见<a href="#train/step">一个 step</a>。</li>
+    </ul>
+    <h3>预取：通信藏在上一层的计算后面</h3>
+    <p class="lede" id="p-f-pref-lede"></p>
+    <div class="fig"><svg id="p-f-pref" viewBox="0 0 680 200" role="img" aria-label="连续几层的计算与 FSDP 通信"></svg><div class="legend" id="p-f-pref-legend"></div></div>
+    <h3>每卡要多少 token 才能藏住</h3>
+    <p class="lede" id="p-f-n-lede"></p>
+    <div class="fig"><svg id="p-f-n" viewBox="0 0 680 320" role="img" aria-label="FSDP 露出时间随每卡 token 数变化"></svg><div class="legend" id="p-f-n-legend"></div></div>
+    <div class="tbl"><table id="p-f-tbl"></table></div>
+  </div>
+  <div class="block" id="par-cp"><h2>CP：切的是一篇文档的 token</h2>
+    <p>CP 把一篇长文档切成 C 段，每张卡只持有 S/C 个 token。线性层、MoE、norm 都只看自己的 token，不需要通信；只有 attention 要看到前面所有 token 的 K / V。Ring、AllGather、Ulysses 是拿到远端 K / V 的三种办法，它们在字节、调用次数、负载均衡和对头数的要求上各不相同。左侧的“全注意力 CP”切的就是这三种（Megatron 里叫 p2p、allgather、a2a）。</p>
+    <div class="cards">
+      <div class="card"><h4><span class="dot" style="background:var(--s1)"></span>Ring</h4><p>K / V 块沿环转 C−1 次，每一步算本地 Q 对当前 K / V 块的局部 attention，用 log-sum-exp 合并。通信和计算交替，可以重叠，但要走 C−1 步依赖链；反向 dK / dV 也要绕环回来（FP32 累加）。causal 下连续切分，最后一段要算最多的块；把序列切成 2C 段首尾配对（head-tail / zigzag）来平衡。</p><p class="meta">ring-flash-attention · Megatron p2p CP · PyTorch CP（ring 旋转）</p></div>
+      <div class="card"><h4><span class="dot" style="background:var(--s2)"></span>AllGather（SPAG）</h4><p>每层先 all-gather 全部 K / V，本地 Q 对完整前缀做一次 attention；反向把 dK / dV reduce-scatter 回去。按 KV 头分块可以流水、也能控制临时显存。字节和 Ring 一个量级，但只有一个调用，GQA 的 KV 头少时很划算。Llama 3 训练用的就是这一种。</p><p class="meta">torchtitan KV all-gather CP · Megatron --allgather-cp</p></div>
+      <div class="card"><h4><span class="dot" style="background:var(--s3)"></span>Ulysses</h4><p>两次 all-to-all 把“按 token 切”换成“按头切”：每张卡拿 H/C 个头的完整序列做普通 attention，再换回来。causal 负载天然均衡，调用固定 8 次（F+B）。代价是 Q / O 也要上网，KV 头数小于 C 时要复制 KV（K′ = max(Hkv, C)），而且每个 TP rank 的头数必须被 C 整除。</p><p class="meta">DeepSpeed-Ulysses · torchtitan Ulysses CP · Megatron a2a CP</p></div>
+    </div>
+    <h3>causal 的块：谁算哪一块</h3>
+    <p class="lede" id="p-c-mat-lede"></p>
+    <div class="figs">
+      <div class="fig"><svg id="p-c-mat" viewBox="0 0 680 330" role="img" aria-label="causal attention 块的分配"></svg></div>
+      <div class="fig"><svg id="p-c-work" viewBox="0 0 680 330" role="img" aria-label="每个 rank 的 attention 工作量"></svg></div>
+    </div>
+    <h3>同一层 attention，三种 CP 的时间线</h3>
+    <p class="lede" id="p-c-gantt-lede"></p>
+    <div class="fig"><svg id="p-c-gantt" viewBox="0 0 680 330" role="img" aria-label="三种 CP 方法的一层时间线"></svg><div class="legend" id="p-c-gantt-legend"></div></div>
+    <div class="tbl"><table id="p-c-tbl"></table></div>
+    <h3>随 CP 度和序列长度变化</h3>
+    <p class="lede">左图：一个 full-attention 层（核心 + 露出的 CP 通信）的 F+B 时间随 C 变化，一篇当前长度的文档切给 C 张卡（强扩展）。右图：整个模型的单卡 token/s 随序列长度变化，CP 度取当前值，每个 micro-batch 一篇文档；空心点是显存放不下。</p>
+    <div class="figs">
+      <div class="fig"><svg id="p-c-vsC" viewBox="0 0 680 320" role="img" aria-label="attention 层时间随 CP 度变化"></svg><div class="legend" id="p-c-vsC-legend"></div></div>
+      <div class="fig"><svg id="p-c-vsS" viewBox="0 0 680 320" role="img" aria-label="单卡 token/s 随序列长度变化"></svg><div class="legend" id="p-c-vsS-legend"></div></div>
+    </div>
+    <h3>固定卡数和每步 token 时，CP 不是越大越好</h3>
+    <p class="lede" id="p-c-fixed-lede"></p>
+    <div class="fig"><svg id="p-c-fixed" viewBox="0 0 680 320" role="img" aria-label="固定卡数和每步 token 时的单步时间"></svg><div class="legend" id="p-c-fixed-legend"></div></div>
+    <h3>混合架构里的 CP</h3>
+    <ul class="tight">
+      <li><b>线性注意力层（GDN / KDA）不需要 K / V。</b>按段传状态时，每张卡先按零初始状态扫自己那段，再交换每段的末状态（Hv × dk × dv，FP32），本地做一次前缀修正，字节和序列长度无关；GDN 在 Megatron 里只能按头 a2a。左侧的“线性注意力 CP”选的就是这两种。所以 Qwen3.5 / Qwen3.8 / GLM / Kimi 这种 3:1 混合模型，CP 的大头只来自那 1/4 的 full-attention 层。</li>
+      <li><b>滑窗层（Muse Spark 的 46 层）只要邻居的最后 W 个 token。</b>Ring / AllGather 退化成一次 halo 交换，字节 ≈ W × KV 宽度，和 C 无关；Ulysses 仍然要两次全量 all-to-all，所以滑窗层越多，Ulysses 越吃亏。</li>
+      <li><b>MLA 只有一份 latent KV。</b>AllGather 的字节最省（每 token 512 + 64 维）；Ulysses 下 latent 不能按头切，每张卡都要拿完整的 latent，KV 部分退化成 all-gather，Q / O 仍走 all-to-all。</li>
+      <li><b>DSA（GLM）的 indexer 也要全量 key。</b>每个 query 只看 top-2048 个 token，attention 核心的 FLOP 随 S 线性增长，但 indexer 的打分仍然是 S² 量级；CP 要把 indexer 的 key 一起 gather。</li>
+    </ul>
+  </div>
+  <div class="block" id="par-ep"><h2>EP：切的是 expert，换来的是 token 搬运</h2>
+    <p>每张卡持有 Z/E 个 expert，token 按 router 的选择去找 expert。attention 一侧的 token 按 DP / CP 切在各卡上，而一个 token 的 k 个 expert 大概率在别的卡上。五个后端的区别在四件事：<b>线上搬几份</b>（按 expert 槽位、按目的 rank 去重、还是整份广播）、<b>谁发起</b>（host 调 NCCL，还是 kernel 自己读写对端显存）、<b>CPU 要不要知道大小</b>（每层一次 D2H 同步，还是全程留在 GPU 上），以及<b>通信能不能和 GEMM 叠在一起</b>。左侧的“EP 通信”（torchtitan）切的就是这五个；Megatron 的 alltoall / DeepEP / HybridEP 按各自的字节算，不在这里比。</p>
+    <div class="formula" id="p-e-formula"></div>
+    <div class="cards" id="p-e-cards"></div>
+    <div class="tbl"><table id="p-e-props"></table></div>
+    <h3>同一层 MoE，五个后端的时间线</h3>
+    <p class="lede" id="p-e-gantt-lede"></p>
+    <div class="fig"><svg id="p-e-gantt" viewBox="0 0 680 420" role="img" aria-label="五个 EP 后端的一层 MoE 时间线"></svg><div class="legend" id="p-e-gantt-legend"></div></div>
+    <h3>随 EP 度和每卡 token 数变化</h3>
+    <p class="lede">左图：MoE 一层的 F+B 时间（含 expert FSDP 里盖不住的部分）随 EP 度变化，其余设置不变。右图：EP 度取当前值，每卡 token 数从 1K 扫到 128K。不可用的组合（Dist-MoE / MoK 跨出 NVLink 域、MoK 不在 NVL72 上）不画。</p>
+    <div class="figs">
+      <div class="fig"><svg id="p-e-vsE" viewBox="0 0 680 320" role="img" aria-label="MoE 层时间随 EP 度变化"></svg><div class="legend" id="p-e-vsE-legend"></div></div>
+      <div class="fig"><svg id="p-e-vsN" viewBox="0 0 680 320" role="img" aria-label="MoE 层时间随每卡 token 数变化"></svg><div class="legend" id="p-e-vsN-legend"></div></div>
+    </div>
+    <h3>expert FSDP 搬权重，EP 搬激活：交叉点</h3>
+    <p class="lede" id="p-e-cross-lede"></p>
+    <div class="fig"><svg id="p-e-cross" viewBox="0 0 680 320" role="img" aria-label="expert 权重字节和激活字节随 EP 度变化"></svg><div class="legend" id="p-e-cross-legend"></div></div>
+    <div class="tbl"><table id="p-e-fan"></table></div>
+  </div>
+</section>
+
+<!-- ============ 后训练 · 低精度 ============ -->
+<section class="pane" data-pane="train/quant" hidden>
+  <div class="block"><h2>训练：三遍 GEMM，各收缩哪一维</h2>
+    <p class="lede">前向 Y = X·Wᵀ 收缩 K，dgrad dX = dY·W 收缩 N，wgrad dW = dYᵀ·X 收缩 M（token）。低精度的块必须沿收缩维排，所以同一个张量在不同的 GEMM 里要不同方向的块。只看 GEMM 算力，反向两遍、前向一遍：时间 ≈ (1/r<sub>f</sub> + 2/r<sub>b</sub>) / 3，FP8 全程 0.5，只有前向 FP8 是 0.83，FP4 全程 0.25，只有前向 FP4 是 0.75。下表再加上量化 kernel、转置副本和 per-token scale 的实际开销。反向用什么精度、梯度对应哪个函数，放在 <a href="#rl/qat">RL · QAT 与反向精度</a>。</p>
+    <div class="tbl"><table id="q-train"></table></div>
+    <div class="bar" id="q-tbar"></div><div class="barlist" id="q-tbarlist"></div>
+  </div>
+  <div class="block"><h2>1D 和 2D：转置之后 scale 还能不能用</h2>
+    <p class="lede">1×B 的块只沿一个方向连续：沿 K 排的 scale 拿去做收缩 N 的 dgrad，等于 scale 沿收缩维在变，又不是按收缩维分的块，块缩放 MMA 用不了，只能从 BF16 再量化一份另一个方向的。B×B 的方块转置后还是方块，scale 对两个收缩方向都是块常数，一份 qdata 就够，只需要两种 scale 摆放（swizzle）。代价是方块里 B 行共用一个 scale，outlier 影响更多元素，所以方块只用在权重上，激活和梯度一般不用：TE 也不支持两个操作数都是 2D。</p>
+    <div class="tbl"><table>
+      <thead><tr><th>张量</th><th>fprop 收缩</th><th>dgrad 收缩</th><th>wgrad 收缩</th><th>1D 块（1×32 / 1×16）</th><th>2D 块（32×32 / 16×16 / 128×128）</th></tr></thead>
+      <tbody>
+        <tr><td>W [N,K]</td><td>K</td><td>N</td><td>—</td><td>行方向一份 + 从 BF16 再量化列方向一份（TE MXFP8 默认）</td><td>一份 qdata：torchtitan <code>weight_qdata_fprop_KN = dgrad_NK.t()</code>；TE NVFP4 预训练默认 16×16；block FP8 128×128</td></tr>
+        <tr><td>X [M,K]</td><td>K</td><td>—</td><td>M</td><td>前向一个 kernel 同时写行、列两份，列方向那份存给 wgrad</td><td>不用：128 个 token 共享 scale，结果会随 batch 组成变</td></tr>
+        <tr><td>dY [M,N]</td><td>—</td><td>N</td><td>M</td><td>反向一个 kernel 写行、列两份（NVFP4 预训练在列方向做 RHT）</td><td>不用</td></tr>
+      </tbody></table></div>
+    <ul class="tight">
+      <li><b>Hopper 与 Blackwell 的另一处不同。</b>Hopper FP8 wgmma 要求两个操作数都是 K-major，转置必须真的拷一份；Blackwell 的 UMMA 支持 MN-major，同一份 qdata 换个描述符就能当转置用。torchtitan 的 32×32 MXFP8 权重就是靠这一点共用 qdata，只存两种 swizzle 的 scale。</li>
+      <li><b>反向不走低精度时，转置问题直接消失。</b>NVFP4 RL 前向用 1D 1×16，量化结果和 SGLang rollout 逐位一致；反向是 BF16 GEMM，只用得到行方向那份（设了 <code>NVTE_BACKWARD_OVERRIDE</code> 时 TE 不生成列方向量化）。Miles 脚本默认 <code>high_precision</code>，用原始 BF16 操作数；4-bitter Lesson 的最终配方用 <code>dequantized</code>，把前向那份量化值反量化回 BF16。LMSYS 测到单层峰值显存比 TE 默认低精度反向少 70.4%（high_precision）和 49.9%（dequantized）。</li>
+      <li><b>MoE 的 wgrad 收缩的是每个 expert 的 token。</b>每个 expert 的行数要按块对齐（FP8 16、MXFP8 / FP4 32），scale 组边界才落在 expert 边界上：Megatron <code>--moe-router-padding-for-quantization</code> 把未路由的 token 以 0 概率补进路由表；torchao <code>pad_token_groups</code> 补齐后用 <code>group_end_offsets // block_size</code> 算 scale 组；torchtitan 的 CuTeDSL 路径要 128。</li>
+    </ul>
+  </div>
+  <div class="block"><h2>放回整个训练 step</h2>
+    <p class="lede" id="q-e2e-trn-lede"></p>
+    <div class="tbl"><table id="q-e2e-trn"></table></div>
+  </div>
+  <div class="block"><h2>解析</h2><div id="q-analysis-trn"></div></div>
+</section>
+
+<!-- ============ 后训练 · 和实测对照 ============ -->
+<section class="pane" data-pane="train/calib" hidden>
+  <div class="block" id="calib-main"><h2>和实测对一下</h2>
+    <p class="lede">数据点库里的匿名实测（8 × H200，一个 NVLink 域，BF16，Qwen3.5-35B-A3B 的形状），凡是这一页能表达的设置，都原样喂给后训练核心的 Train.run / Par：torchtitan、full AC 与否照实测，只把 attention 核心效率换成单卡校准值（FA2 在 256 维头上 273 / 989），其余都是左侧“效率系数”的当前值，没有对这些点做拟合，改效率系数这里会一起变。小形状（每卡几 K token、几十 µs 的 kernel）本页明显偏快：固定开销只按 launch 和 α 计。在汇总表里点一行，下面列出这个数据集的每个点。</p>
+    <div class="fig"><svg id="p-calib-plot" viewBox="0 0 680 380" role="img" aria-label="本页预测对实测的散点图，对数坐标"></svg><div class="legend" id="p-calib-legend"></div></div>
+    <div class="tbl"><table id="p-calib-sum"></table></div>
+    <p class="lede" id="p-calib-cond"></p>
+    <div class="tbl" style="max-height:360px;overflow:auto"><table id="p-calib-pts"></table></div>
+  </div>
+</section>
+
+<!-- ============ 推理 · 一步 ============ -->
+<section class="pane" data-pane="infer/step" hidden>
+  <div class="block"><h2>当前配置的一步</h2>
+    <p class="lede" id="i-lede"></p>
+    <div class="kpis" id="i-kpis"></div>
+  </div>
+  <div class="block"><h2>这一步的时间花在哪里</h2>
+    <p class="lede">每个 kernel 取 max(FLOPs/算力, 字节/带宽, 最短 kernel 时间)，通信按链路带宽加固定延迟，沿层数累加。藏在 routed expert 后面的 shared expert 和融合 a2a 只记露出来的部分。eager 时 CPU 发 kernel 比 GPU 跑得慢，多出来的部分单列。</p>
+    <div class="bar" id="i-bar"></div>
+    <div class="barlist" id="i-barlist"></div>
+  </div>
+  <div class="block"><h2>kernel 序列</h2>
+    <p class="lede" id="i-ops-lede"></p>
+    <div class="tbl"><table id="i-ops"></table></div>
+    <div class="tbl"><table id="i-comm"></table></div>
+  </div>
+  <div class="block"><h2>每个 kernel 在 roofline 上的位置</h2>
+    <div class="fig"><svg id="i-roof" viewBox="0 0 680 380" role="img" aria-label="推理 roofline"></svg>
+      <div class="legend" id="i-roof-legend"></div></div>
+  </div>
+  <div class="block" data-phase="decode"><h2>同一个配置，换个引擎</h2>
+    <p class="lede">并发 B 从 1 拉到显存上限。锯齿来自 CUDA graph 的补齐阶梯：B 刚越过一个台阶，就要按下一个台阶的行数跑。曲线断崖处是 graph 上限，越过之后改走 eager（TokenSpeed 160、开投机 80；SGLang 512、开投机直接把并发限到 48；vLLM 按 token 计 512 或 1024）。TP1、不开投机时三家发出的 kernel 几乎一样，曲线会重合；差别主要来自 TP&gt;1 时的 AR 融合、MoE 默认并行方式、graph 上限、投机验证的状态流量和 lm_head / 采样是否在 graph 里。</p>
+    <div class="figs">
+      <div class="fig"><svg id="i-sw-lat" viewBox="0 0 680 340" role="img" aria-label="TPOT 随并发"></svg></div>
+      <div class="fig"><svg id="i-sw-thr" viewBox="0 0 680 340" role="img" aria-label="吞吐随并发"></svg></div>
+    </div>
+    <div class="legend" id="i-sw-legend"></div>
+  </div>
+  <div class="block" data-phase="prefill"><h2>长 prompt 的每个 chunk</h2>
+    <p class="lede">prefill 按 chunk 推进，每个 chunk 的注意力要看前面所有 token。SGLang 和 TokenSpeed 的 MLA prefill 每个 chunk 都把前缀重新过一遍 kv_b 展开，所以 MLA 模型的 chunk 时间涨得更快；TokenSpeed 的 DSA prefill 直接走 absorbed 稀疏 MLA，不展开。</p>
+    <div class="fig"><svg id="i-chunks" viewBox="0 0 680 340" role="img" aria-label="每个 chunk 的耗时"></svg></div>
+    <div class="legend" id="i-chunks-legend"></div>
+  </div>
+  <div class="block"><h2>三个引擎在这个配置上的差别</h2>
+    <p class="lede">下表每一列都按当前配置现场跑一遍对应引擎的步骤模型；MoE 并行方式取该引擎支持的最接近选项。</p>
+    <div class="tbl"><table id="i-diff"></table></div>
+  </div>
+  <div class="block"><h2>显存</h2>
+    <div class="bar" id="i-mem"></div><div class="barlist" id="i-memlist"></div>
+  </div>
+  <div class="block"><h2>解析</h2><div id="i-analysis"></div></div>
+</section>
+
+<!-- ============ 推理 · 部署与并行 ============ -->
+<section class="pane" data-pane="infer/deploy" hidden>
+  <div class="block"><h2>推理的并行和训练不是一回事</h2>
+    <p class="lede">同样叫 TP、EP、DP，推理和训练切的东西、换来的东西都不一样：推理一步只有一个前向，行数是“并发 × 投机宽度”，要的是单用户速度、KV 容量和单卡吞吐；训练每个 micro-batch 有几千到几万行、要反向和优化器，要的是放得下激活和参数、通信藏得住。训练那一侧见<a href="#train/par">后训练 · 并行</a>。</p>
+    <div class="tbl"><table>
+      <thead><tr><th>维度</th><th>推理：切什么，换来什么</th><th>训练：切什么，换来什么</th></tr></thead>
+      <tbody>
+        <tr><td>TP</td><td>切权重和注意力头：每步读的权重字节 ÷ N，单用户速度上去；每层两次小消息 all-reduce，受延迟限制；KV 头少于 TP 度时每卡复制 KV</td><td>和 SP 一起切激活和权重：每块前向 AG + RS、反向再来一遍，消息大、受带宽限制；主要为了放下激活</td></tr>
+        <tr><td>DP</td><td>多实例：副本之间不通信。DP-attention：一个实例里按请求切 attention，KV 不复制，MoE 前后要 all-gather 或 a2a，所有 rank 每步对齐</td><td>梯度 reduce-scatter + 参数 all-gather（分布式优化器每 step 一次，FSDP2 每个 micro-batch 一次）</td></tr>
+        <tr><td>EP</td><td>expert 分到各卡：省权重显存，每个 expert 看到全部 DP rank 的 token；decode 每层 dispatch + combine 是小消息（DeepEP low-latency）</td><td>grouped GEMM 行数大；a2a 每层 4 次（重算 6 次），可以和另一个 micro-batch 的计算重叠</td></tr>
+        <tr><td>CP / DCP</td><td>长 prompt 的 prefill 才按 token 切；decode 用 DCP 切 MLA 的 latent KV</td><td>长序列训练的主力：Ring / AllGather / Ulysses</td></tr>
+        <tr><td>PP</td><td>少用；长上下文 prefill 可以分块流水（SGLang PP），decode 有气泡</td><td>大模型常用，气泡 (p−1)/v 个 micro-batch</td></tr>
+        <tr><td>FSDP</td><td>不用：推理权重常驻</td><td>torchtitan 的主轴，dense 和 expert 各一维</td></tr>
+        <tr><td>PD 分离</td><td>prefill 和 decode 用不同的卡、不同的并行方式，KV 在两者之间搬</td><td>没有对应物</td></tr>
+      </tbody></table></div>
+  </div>
+  <div class="block" id="infer-tradeoff"><h2>推荐配置怎么取舍</h2>
+    <p class="lede">把当前模型在当前拓扑上的 SGLang、vLLM 推荐配置（就是左侧“部署预设”里那几条）和 DeepInfer 的部署形状画在一张图上。横轴是单用户速度（tok/s/user，= 1 / TPOT），纵轴是单卡吞吐（tok/s/GPU）。每条曲线是一种配置把每个 DP rank 的并发从 1 扫到显存或引擎上限；越靠右上越好，曲线之间的交叉就是取舍点。这是 SemiAnalysis InferenceX 的画法：比较时固定横轴（同样的用户体验），再看谁的单卡吞吐高。每个点都是上面同一个 decode 核心算出来的，再加上分摊进来的 prefill（聚合部署）或单独的 prefill 卡（PD 分离）。</p>
+    <div class="inline">
+      <label>输入 / 输出<select id="i-to-seq" aria-label="输入和输出长度"></select></label>
+      <label>目标单用户速度<select id="i-to-target" aria-label="目标单用户速度"></select></label>
+      <label class="check"><input type="checkbox" id="i-to-total"><span>吞吐按输入 + 输出 token 计（InferenceX 的 total）</span></label>
+    </div>
+    <div class="kpis" id="i-to-kpis"></div>
+    <div class="fig"><svg id="i-to-pareto" viewBox="0 0 680 380" role="img" aria-label="单卡吞吐对单用户速度"></svg><div class="legend" id="i-to-pareto-legend"></div></div>
+    <div class="tbl"><table id="i-to-cfg"></table></div>
+  </div>
+  <div class="block"><h2>随上下文长度：固定单用户速度看吞吐</h2>
+    <p class="lede" id="i-to-ctx-lede"></p>
+    <div class="fig"><svg id="i-to-ctx" viewBox="0 0 680 320" role="img" aria-label="固定单用户速度下吞吐随输入长度变化"></svg><div class="legend" id="i-to-ctx-legend"></div></div>
+  </div>
+  <div class="block"><h2>随拓扑：同一组配方放到 HGX 和 NVL72</h2>
+    <p class="lede" id="i-to-topo-lede"></p>
+    <div class="tbl"><table id="i-to-topo"></table></div>
+  </div>
+  <div class="block"><h2>怎么选</h2>
+    <ul class="tight" id="i-to-rules"></ul>
+  </div>
+</section>
+
+<!-- ============ 推理 · 低精度 ============ -->
+<section class="pane" data-pane="infer/quant" hidden>
+  <div class="block"><h2>当前方案的一个 GEMM</h2>
+    <p class="lede" id="q-lede"></p>
+    <div class="kpis" id="q-kpis"></div>
+  </div>
+  <div class="block"><h2>先看 M：量化省的是哪一边</h2>
+    <p class="lede">GEMM 的时间取 max(FLOPs / 算力, 字节 / 带宽)。M 小时权重读取占满字节，降低权重位数直接省时间；M 大时算力是瓶颈，只有激活也降精度、换到更高的 MMA 峰值才有用。拐点 M* = 峰值 × 权重每元素字节 ÷ (2 × 带宽)：权重越窄拐点越早，峰值越高拐点越晚。左图是各方案相对 BF16 的时间比，含 scale 字节、激活量化和 W4A16 的反量化；右图是当前 M 下各方案在 roofline 上的位置。</p>
+    <div class="figs">
+      <div class="fig"><svg id="q-sweep" viewBox="0 0 680 340" role="img" aria-label="各方案相对 BF16 的加速随 M 变化"></svg></div>
+      <div class="fig"><svg id="q-roof" viewBox="0 0 680 340" role="img" aria-label="当前 M 的 roofline"></svg></div>
+    </div>
+    <div class="legend" id="q-sweep-legend"></div>
+  </div>
+  <div class="block"><h2>同一个 GEMM，七种方案</h2>
+    <p class="lede">字节拆成权重本体、块 scale、激活、输出；“量化 kernel”只在激活量化没融合时出现，“反量化”只有 W4A16 有。M* 按不补齐算。这一节和上面两张图按纯 roofline 算，不计 kernel 最短时间：小形状的单个 GEMM 实际会被约 2 µs 的下限盖住，这部分放在 MoE 一节和“放回整个 decode 一步”里。</p>
+    <div class="tbl"><table id="q-gemm"></table></div>
+  </div>
+  <div class="block"><h2>MoE：每个 expert 的 M 只有 T·k/E</h2>
+    <p class="lede" id="q-moe-lede"></p>
+    <div class="fig"><svg id="q-moe" viewBox="0 0 680 340" role="img" aria-label="MoE 层随 token 数的加速"></svg></div>
+    <div class="legend" id="q-moe-legend"></div>
+    <div class="tbl"><table id="q-moe-tbl"></table></div>
+    <div class="tbl"><table id="q-align"></table></div>
+  </div>
+  <div class="block"><h2>放回整个 decode 一步</h2>
+    <p class="lede" id="q-e2e-inf-lede"></p>
+    <div class="tbl"><table id="q-e2e-inf"></table></div>
+  </div>
+  <div class="block"><h2>解析</h2><div id="q-analysis-inf"></div></div>
+</section>
+
+<!-- ============ 推理 · 投机解码 ============ -->
+<section class="pane" data-pane="infer/spec" hidden>
+  <div class="block"><h2>投机解码：一步里多出来的三项</h2>
+    <p class="lede" id="s-lede"></p>
+    <div class="kpis" id="s-kpis"></div>
+    <div class="bar" id="s-bar"></div><div class="barlist" id="s-barlist"></div>
+  </div>
+  <div class="block"><h2>四种 draft 方法</h2>
+    <p class="lede">验证都一样：目标模型对 k 个 draft token 再加一个 bonus 位置做一次宽度 k+1 的 forward，按拒绝采样逐个接受，输出分布和不开投机完全相同。区别在 draft 从哪来、每步读多少权重、k 个 token 是一个一个出还是一次出。</p>
+    <div class="tbl"><table>
+      <thead><tr><th>方法</th><th>draft 从哪来</th><th>出 k 个 token</th><th>本页怎么算 draft</th><th>常见 k / 接受长度</th></tr></thead>
+      <tbody>
+        <tr><td>MTP</td><td>模型自带的 MTP 层（DeepSeek、Qwen3.5 / 3.8、GLM、Kimi K3 等），和主模型一起训练</td><td>自回归，k 步，每步一层 + lm_head</td><td>目标模型一层的平均代价：第一步按验证宽度，之后每步 1 行，加 k 次 lm_head</td><td>k = 1–3，接受长度 2–3.5</td></tr>
+        <tr><td>EAGLE-3</td><td>单独训练的 draft head：把目标模型低、中、高三层的特征拼起来（3D → D），再接一层 decoder</td><td>自回归，k 步；可以按树展开</td><td>一次 3D → D 投影 + 每步一层 dense + 裁剪到 32K 的词表</td><td>k = 3–7，接受长度约 3–4.5</td></tr>
+        <tr><td>DFlash / DFlash2</td><td>约 5 层的小 block-diffusion 模型，以目标模型的特征为条件；DFlash2 换了训练方法</td><td>一次 forward 出一整块（块大小 8–16）</td><td>目标特征投影出每层的上下文 K / V + 5 层 dense 对 B·(k+1) 行做一次 forward + 全词表 lm_head</td><td>块 8–16，接受长度 5–6.5</td></tr>
+        <tr><td>DSpark</td><td>同 DFlash 的块式 draft，加一个低秩 Markov 头修正相邻 token；按置信度逐请求裁剪验证长度</td><td>一次 forward 出一块，验证长度可变</td><td>同 DFlash（B·k 行），外加 k 次 [B, 256] × [256, V] 的 Markov 偏置</td><td>块 7，接受长度 5–6（DeepSeek-V4 上 γ ≤ 5）</td></tr>
+      </tbody></table></div>
+  </div>
+  <div class="block"><h2>接受率 α 和 draft 长度 k</h2>
+    <p class="lede">每个位置以概率 α 被接受、第一次拒绝就停（i.i.d. 近似）时，一步平均产出 τ = (1 − α<sup>k+1</sup>) / (1 − α) 个 token（含 bonus）。左侧“每步平均多接受的 token”就是 τ − 1，这一页由它和 k 反解出 α。α 越高，长 draft 越值；α 低时 k 再大也只是白白加宽验证。块式 draft（DFlash / DSpark）的 α 不是常数，越往后越低，这里只看量级。</p>
+    <div class="fig"><svg id="s-tau" viewBox="0 0 680 320" role="img" aria-label="平均产出 token 数随 draft 长度变化"></svg><div class="legend" id="s-tau-legend"></div></div>
+  </div>
+  <div class="block"><h2>同一个 α，四种方法的代价</h2>
+    <p class="lede" id="s-cost-lede"></p>
+    <div class="fig"><svg id="s-vsk" viewBox="0 0 680 250" role="img" aria-label="单用户速度提升随 draft 长度变化"></svg></div>
+    <div class="fig"><svg id="s-vsb" viewBox="0 0 680 250" role="img" aria-label="单卡吞吐提升随并发变化"></svg></div>
+    <div class="legend" id="s-vs-legend"></div>
+    <div class="tbl"><table id="s-ledger"></table></div>
+  </div>
+  <div class="block"><h2>引擎支持（截至 2026-10）</h2>
+    <p class="lede">只列过去一年发布说明和文档里能查到的条目；“—”只表示没查到单独的说明，不代表不支持。</p>
+    <div class="tbl"><table id="s-eng"></table></div>
+  </div>
+  <div class="block"><h2>公开数字</h2>
+    <p class="lede">模型、温度、数据集和并发各不相同，只看量级和方向。</p>
+    <div class="tbl"><table id="s-pub"></table></div>
+  </div>
+  <div class="block"><h2>放到 RL rollout 里</h2><div id="s-rl"></div></div>
+</section>
+
+<!-- ============ RL · 训推不一致 ============ -->
+<section class="pane" data-pane="rl/mismatch" hidden>
+  <div class="block"><h2>训推不一致：rollout 和训练算的不是同一个函数</h2>
+    <p class="lede">RL 用推理引擎采样，用训练框架算梯度。两边的 kernel、并行方式、精度和 batch 组成都不同，同一个 token 的 log-prob 在两边对不上：π<sub>rollout</sub> ≠ π<sub>train</sub>。算法上是 on-policy，实际优化的却是 off-policy 目标。MoE 会把差异放大：router logit 的一点差别就能换掉 top-k 里的一个 expert，整层输出跟着跳；差异随训练积累，严重时 reward 崩掉。</p>
+    <div class="tbl"><table>
+      <thead><tr><th>来源</th><th>为什么两边不一样</th><th>怎么修</th></tr></thead>
+      <tbody>
+        <tr><td>kernel 与归约顺序</td><td>attention、GEMM、all-reduce 的分块和累加顺序不同，浮点结果不同；推理的结果还随 batch 组成变（continuous batching 把别的请求拼进同一个 GEMM）</td><td>batch-invariant / 确定性 kernel；训练前向直接调用推理 kernel（true on-policy）</td></tr>
+        <tr><td>MoE 路由</td><td>router 的微小差异换掉 top-k 里的 expert</td><td>R3（rollout routing replay）：推理返回每个 token 选中的 expert，训练按它路由</td></tr>
+        <tr><td>量化</td><td>rollout 用 FP8 / FP4，训练用 BF16；前向的量化误差是主因</td><td>训练前向复现同样的量化、逐位对齐量化结果；QAT；或两边统一精度</td></tr>
+        <tr><td>采样</td><td>top-p / top-k 截断了推理侧的分布，训练侧按完整 softmax 算 log-prob</td><td>返回采样掩码，训练侧回放同样的支撑集</td></tr>
+        <tr><td>tokenization</td><td>多轮 agent 里重新分词、chat template 裁掉历史 reasoning、tool call 重渲染，训练看到的 token 和 rollout 不同</td><td>TITO（token in, token out）：直接把 rollout 的 token id 交给训练</td></tr>
+        <tr><td>权重版本</td><td>异步 RL 里 rollout 用的是旧权重</td><td>记录每个 token 实际服务的权重版本；decoupled PPO 和重要性采样修正</td></tr>
+      </tbody></table></div>
+  </div>
+  <div class="block"><h2>两类办法：算法上修正，工程上对齐</h2>
+    <p><b>算法上修正。</b>把 π<sub>train</sub> / π<sub>rollout</sub> 当重要性权重乘进策略梯度。TIS 把权重截断在上限 C（token 级或序列级），MIS 直接把比值越界的 token 或序列 mask 掉，IcePop、KPop 是同一思路的变体。它们不消除差异，只让梯度不被少数离谱的 token 带偏，代价是有效样本变少。</p>
+    <p><b>工程上对齐。</b>让两边算的尽量是同一个函数：R3 消掉路由差异，量化逐位对齐消掉精度差异，TITO 消掉 token 差异，batch-invariant kernel 加上训练前向复用推理 kernel 消掉剩下的数值差异，log-prob 差可以做到 0。代价是 rollout 变慢、训练要跟推理用同样的 kernel。实际做法是两者都用：先对齐到差异很小，再用 IS 兜底。</p>
+    <div class="tbl"><table id="r-mm-pub"></table></div>
+  </div>
+  <div class="block"><h2>要从 rollout 搬回训练的东西</h2>
+    <p class="lede" id="r-mm-lede"></p>
+    <div class="tbl"><table id="r-mm"></table></div>
+  </div>
+  <div class="block"><h2>开源实现的进展</h2>
+    <p class="lede">过去一年 SGLang / vLLM / slime / Miles / AReaL 发布说明和 LMSYS 博客里和训推一致有关的条目，按时间排。完整列表在<a href="#appendix/data/releases">附录 · 数据与发布</a>。</p>
+    <div class="tbl"><table id="r-mm-oss"></table></div>
+  </div>
+</section>
+
+<!-- ============ RL · 低精度 rollout ============ -->
+<section class="pane" data-pane="rl/lowprec" hidden>
+  <div class="block"><h2>低精度 rollout：RL 一步快多少</h2>
+    <p class="lede" id="r-lp-lede"></p>
+    <div class="tbl"><table id="q-rl"></table></div>
+    <h3>公开的结果</h3>
+    <div class="tbl"><table id="r-lp-pub"></table></div>
+  </div>
+  <div class="block"><h2>生产链路：每一环在哪里量化</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>环节</th><th>权重</th><th>激活</th><th>Blackwell 上的格式</th><th>代码</th></tr></thead>
+      <tbody>
+        <tr><td>① 初始 rollout checkpoint</td><td>离线</td><td>—</td><td>MXFP8 1×32；NVFP4 1×16（只量化 expert，<code>input_scale</code> 写全 1 占位）</td><td>Miles <code>tools/convert_hf_to_{mxfp8,nvfp4}.py</code></td></tr>
+        <tr><td>② 训练</td><td>BF16 主权重，每次 GEMM 在线量化</td><td>在线，1D</td><td>MXFP8 行列各一份；NVFP4 RL 前向 1D、按 token，反向 BF16（Miles 脚本 high_precision，4-bitter Lesson dequantized）</td><td>Miles <code>--fp8-recipe mxfp8</code> / <code>--fp4-recipe nvfp4</code> + <code>NVTE_*</code></td></tr>
+        <tr><td>③ 权重更新</td><td>训练侧在线量化成 ① 的格式</td><td>—</td><td>MXFP8 只导出行方向；NVFP4 gate / up 共用一个 FP32 scale</td><td><code>quantizer_{mxfp8,nvfp4}.py</code>、<code>nvfp4_quantize_1d_pair</code></td></tr>
+        <tr><td>④ rollout</td><td>收到的成品</td><td>每次 forward 动态</td><td>NVFP4 按 token FP32 scale 融合在 FlashInfer 激活量化 kernel 里</td><td>SGLang <code>flashinfer_trtllm_routed</code>，<code>SGLANG_FLASHINFER_NVFP4_PER_TOKEN_ACTIVATION=1</code></td></tr>
+        <tr><td>⑤ 生产推理</td><td>离线 checkpoint，或加载时在线转换</td><td>动态，或校准的静态 scale</td><td><code>nvfp4_online</code>（4over6，MSE）；vLLM <code>nvfp4_per_token</code> / <code>mxfp8</code> / <code>fp8_per_block</code></td><td>SGLang <code>nvfp4_online.py</code>；vLLM <code>quantization/online/</code></td></tr>
+      </tbody></table></div>
+    <p>训练和推理的量化必须逐位一致：同一个张量两边量化方式不同，采样的策略和学习的策略就不是同一个低精度模型。所以 ③ 要用和 ① 一样的块形状；NVFP4 按 token 的 scale 在 expert TP 切开时，SGLang 和 Megatron 的 ETP 也要相同；gate / up 在两边都融合成一个 GEMM，导出时必须共用 FP32 scale（SGLang 收到不同的会取 max 再重量化）。4/6 两边各有开关：训练和导出侧是 <code>NVTE_NVFP4_4OVER6</code>（误差度量默认 MAE），SGLang rollout 侧是 FlashInfer 的 <code>FLASHINFER_NVFP4_4OVER6</code>，要一起开、用同一种误差度量；⑤ 的 <code>nvfp4_online</code> 是生产路径，固定 MSE。</p>
+    <p>这里的“逐位一致”只到量化结果（FP4 码、E4M3 块 scale、FP32 scale、4/6 的选择）。两边的 GEMM 累加顺序、attention kernel 和通信仍然不同，log-prob 还有小的差异，所以仍要 TIS / routing replay。要让 log-prob 也逐位一致，只能让训练前向直接调用推理 kernel（vLLM 2026-10 的做法，rollout 吞吐降到基线的 87.5–91.3%）。</p>
+  </div>
+  <div class="block"><h2>权重同步：每一步要搬多少</h2>
+    <p class="lede" id="r-ws-lede"></p>
+    <div class="tbl"><table id="r-ws"></table></div>
+    <h3>开源实现怎么做权重同步</h3>
+    <div class="tbl"><table id="r-ws-pub"></table></div>
+  </div>
+</section>
+
+<!-- ============ RL · QAT ============ -->
+<section class="pane" data-pane="rl/qat" hidden>
+  <div class="block"><h2>QAT：训练时就让模型见过量化</h2>
+    <p>低精度 rollout 的权重是从 BF16 主权重量化出来的。训练完再量化（PTQ）在 RL 里有两个问题：rollout 的策略和训练的策略差一个量化误差，而且这个误差每一步都在变；FP4 / INT4 这种窄格式下，差异大到重要性采样兜不住。QAT 在训练前向里先把权重（和激活）按 rollout 的格式量化、再反量化（fake quant），反向用直通估计（STE）把梯度原样传给 BF16 主权重，训练优化的就是 rollout 实际执行的那个量化函数。</p>
+    <ul class="tight">
+      <li><b>显式 fake quant。</b>前向 W → Q(W) → 反量化 → BF16 GEMM，rollout 用同一种量化（slime / Miles 的 INT4 QAT 配 W4A16 rollout）。GEMM 算力和 BF16 训练一样，只多一个量化 kernel；Hopper 没有 INT4 tensor core，W4A16 rollout 省的是显存和带宽，算力仍是 BF16。</li>
+      <li><b>隐式 QAT。</b>前向直接跑真 FP4 GEMM，反向把前向那份量化值反量化回 BF16 再做 dgrad / wgrad（TE 的 <code>dequantized</code> 反向）：梯度对应实际执行的量化函数，和 fake quant + STE 等价，前向还更快。</li>
+    </ul>
+  </div>
+  <div class="block"><h2>反向用什么精度</h2>
+    <p>训推 log-prob 的差异只取决于前向；反向精度决定的是梯度对应哪个函数。BF16 反向用原始值（<code>high_precision</code>）时，求的是没量化的 y = x·w，和前向对不上，4-bitter Lesson 观察到偶发的梯度尖峰；用前向那份量化值反量化回 BF16（<code>dequantized</code>）时，梯度对应实际执行的量化函数，等价于 fake quant + STE，也就是 QAT 的梯度，只是前向换成了真 FP4 GEMM；全程低精度反向再多一份梯度噪声。三种反向的 loss 和传回的 dY 都来自同一个量化前向，所以训推一致性相同，差别只在梯度。两篇最新报告在这里分歧：4-bitter Lesson 要求梯度对应实际执行的函数，选 dequantized；miniTE 拿高精度参考梯度检验反向，选原始值，它的 learner 加速也是在这个口径下测的。截至 2026-10-29，Miles 脚本默认仍是原始值，dequantized 是进阶选项；两种反向还没在同一设置下比过学习质量。</p>
+    <p class="lede" id="r-qat-lede"></p>
+    <div class="tbl"><table id="r-qat"></table></div>
+  </div>
+  <div class="block"><h2>开源实现和报告</h2>
+    <div class="tbl"><table id="r-qat-oss"></table></div>
+  </div>
+</section>
+
+<!-- ============ 附录 · 数据与发布 ============ -->
+<section class="pane" data-pane="appendix/data" hidden>
+  <div class="block"><h2>数据与发布</h2>
+    <p class="lede">别人公布的数字都集中在这一页，按推理、训练、量化分开（投机解码的公开数字在<a href="#infer/spec">推理 · 投机解码</a>）。各家的口径、模型和硬件都不同，只作量级和方向参考；能用本页模型复现的，旁边给出本页算出来的数。自己测的匿名数据点不在这里，在<a href="#train/calib">后训练 · 和实测对照</a>。</p>
+    <div class="subnav"><a href="#appendix/data/infer">推理</a><a href="#appendix/data/pareto">Pareto 参照</a><a href="#appendix/data/train">训练</a><a href="#appendix/data/quant">量化</a><a href="#appendix/data/releases">过去一年的发布</a><a href="#appendix/data/db">数据点库</a></div>
+  </div>
+  <div class="block" id="data-infer"><h2>推理：服务数字</h2>
+    <div class="tbl"><table id="pub-infer"></table></div>
+  </div>
+  <div class="block" id="data-pareto"><h2>推理：Pareto 参照</h2>
+    <p class="lede">对照<a href="#infer/deploy">推理 · 部署与并行</a>的取舍图（单卡吞吐对单用户速度）看曲线形状，不要逐点比。</p>
+    <div class="tbl"><table id="pub-pareto"></table></div>
+  </div>
+  <div class="block" id="data-train"><h2>训练：EP 后端</h2>
+    <div class="tbl"><table id="pub-train"></table></div>
+  </div>
+  <div class="block" id="data-quant"><h2>量化：PR、博客与文档（越新越可信）</h2>
+    <p class="lede">数据点库里的公开数据点（已合并 PR、博客、文档）。每条按“时效 × 硬件匹配 × 来源”打权重：时效半衰期 12 个月；性能数字只有 B200 / B300 / GB200 / GB300 记满分，Hopper 和 AMD 记一半；精度结论和 bug 与架构关系小，记 0.8。“本页模型”一列是低精度一节的公式在同一个问题上算出来的数，用来校准，不是拟合。</p>
+    <div class="legend">
+      <label>主题 <select id="q-ev-topic" aria-label="按主题筛选"></select></label>
+      <label class="check" style="margin:0"><input type="checkbox" id="q-ev-bw"><span>只看 B200 / B300 / GB200 / GB300</span></label>
+      <label>排序 <select id="q-ev-sort" aria-label="排序"><option value="date">按日期</option><option value="w">按权重</option></select></label>
+    </div>
+    <div class="tbl"><table id="q-evid"></table></div>
+  </div>
+  <div class="block" id="data-releases"><h2>过去一年的发布与博客（2025-11 → 2026-10）</h2>
+    <p class="lede">LMSYS 博客，SGLang / vLLM / slime / Miles / AReaL 的 GitHub release，只摘和推理、训练、低精度、投机解码、RL 有关的要点。先看每个项目一段话的主线，再按项目、标签筛具体条目。</p>
+    <div class="tbl"><table id="rel-sum"></table></div>
+    <div class="legend"><label>项目 <select id="rel-proj" aria-label="按项目筛选"></select></label><label>标签 <select id="rel-tag" aria-label="按标签筛选"></select></label><label>筛选 <input id="rel-q" type="search" placeholder="R3 / NVFP4 / DFlash" aria-label="按文本筛选"></label><span id="rel-n" class="tag"></span></div>
+    <div class="tbl" style="max-height:560px;overflow:auto"><table id="rel-list"></table></div>
+  </div>
+  <div class="block" id="data-db"><h2>数据点库</h2>
+    <p class="lede">页面里所有实测数字都来自同一个数据点库（<code>data/db.json</code>，由 <code>tools/build_db.py</code> 生成）。匿名数据点只保留测量条件和数字；公开数据点带出处。每个数据集的点都是同一组维度和指标，可以在这里按数据集翻看。</p>
+    <div class="tbl"><table id="m-db-sets"></table></div>
+    <div class="legend"><label>数据集 <select id="m-db-set" aria-label="选择数据集"></select></label><label>筛选 <input id="m-db-q" type="search" placeholder="qwen35 / ulysses" aria-label="按文本筛选"></label><span id="m-db-n" class="tag"></span></div>
+    <p class="lede" id="m-db-cond"></p>
+    <div class="tbl" style="max-height:420px;overflow:auto"><table id="m-db-pts"></table></div>
+  </div>
+</section>
+
+<!-- ============ 附录 · 量化基础 ============ -->
+<section class="pane" data-pane="appendix/quant" hidden>
+  <div class="block"><h2>格式与 scale</h2>
+    <p class="lede">E2M1 只有 ±{0, 0.5, 1, 1.5, 2, 3, 4, 6} 这 15 个值，动态范围约 3.6 个二进制档，所以 FP4 必须配小块；E4M3 有约 17.8 档，块可以大一些。scale 的格式决定块 amax 能不能精确对齐到元素的最大码字：E8M0 只能是 2 的幂，要向上取整，平均浪费约半档；E4M3 有尾数能对齐到 6，但范围只到 448，所以 NVFP4 要再加一级 FP32。两级分工不同：16 个一组的 E4M3 块 scale 沿 K（hidden）切，管 hidden 方向的大小差异；FP32 那一级只给块 scale 定量程，取 amax 的范围才是“按张量”和“按 token”的区别。按张量时，一个 token 的量化结果要看同一个张量里的其他行：推理侧 continuous batching 把别的请求拼进同一个 GEMM，训练侧把整条序列一起算，后面 token 的 amax 会改写前面 token 的块 scale 取整。按 token 只看自己这一行，与 batch 组成、prefill / decode、训练 / rollout 都无关，而且只沿 M 变，仍能在 epilogue 里乘。</p>
+    <div class="tbl"><table id="q-formats"></table></div>
+    <pre>Y[m,n] = Σ_k X[m,k] · W[n,k]
+scale 只沿 M 或 N 变：Y = diag(s_x) · (X'W'ᵀ) · diag(s_w)        → 提到 epilogue 里乘一次（按张量 / 通道 / token）
+scale 沿 K 变：      Y = Σ_kb s_x[m,kb] · s_w[n,kb] · (X'W'ᵀ)_kb → 每个 K 块都要乘，只能在 MMA 里做（blockwise）</pre>
+    <p>Hopper 的 tensor core 不能在 K 方向乘 scale，DeepGEMM 每 128 个 K 把部分和取到 CUDA core 上乘 scale 再累加，所以 block FP8 的块是 128。Blackwell 的块缩放 MMA 在硬件里乘 scale，块才能缩到 32 或 16，但 scale 必须是 2 的幂（E8M0）或 E4M3：block FP8 的 FP32 scale 在 Blackwell 上要先取整成 UE8M0，SGLang 和 vLLM 在加载时 requant，这份契约的边界上出过好几个 bug（见<a href="#appendix/data/quant">数据与发布 · 量化</a>）。</p>
+  </div>
+  <div class="block"><h2>名词</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>名词</th><th>意思</th><th>在本页哪里</th></tr></thead>
+      <tbody>
+        <tr><td>W<i>x</i>A<i>y</i></td><td>权重 x 位、激活 y 位。W4A16 只省权重读取，MMA 仍是 BF16；W8A8 / W4A4 激活也降精度，才能用更高的 MMA 峰值；W4A8 的 MMA 跑 FP8</td><td><a href="#infer/quant">低精度推理</a></td></tr>
+        <tr><td>按张量 / 通道 / token / 块</td><td>scale 的粒度。前三种 scale 只沿 M 或 N 变，可以提到 GEMM 的 epilogue 里乘；块 scale 沿 K 变，只能在 MMA 里乘</td><td>上面的公式</td></tr>
+        <tr><td>MX / NV</td><td>OCP MX 格式（MXFP8 / MXFP6 / MXFP4）：32 个元素一块，E8M0 scale；NVFP4：16 个一块，E4M3 scale 再加一级 FP32</td><td>上面的格式表</td></tr>
+        <tr><td>1D / 2D 块</td><td>1×B 的块只沿一个方向连续，转置后要重新量化；B×B 的方块转置后还能用，一般只用在权重上</td><td><a href="#train/quant">低精度训练</a></td></tr>
+        <tr><td>动态 / 静态 scale</td><td>动态：每次 forward 按当前激活算 amax；静态：用校准集离线定好。RL rollout 一般用动态</td><td><a href="#rl/lowprec">低精度 rollout</a></td></tr>
+        <tr><td>4over6（4/6）</td><td>NVFP4 每块在“amax 对齐到 6”和“对齐到 4”之间选误差小的那个；训练、导出和推理两侧要用同样的开关和误差度量</td><td><a href="#rl/lowprec">低精度 rollout</a></td></tr>
+        <tr><td>RHT</td><td>随机 Hadamard 变换：量化前把一块元素旋转一下摊平 outlier，TE 的 NVFP4 预训练配方在 wgrad 的输入上用</td><td><a href="#train/quant">低精度训练</a></td></tr>
+        <tr><td>SR</td><td>随机舍入：按距离的概率向上或向下取整，期望无偏，用在梯度上</td><td><a href="#train/quant">低精度训练</a></td></tr>
+        <tr><td>PTQ / QAT</td><td>训练后量化 / 量化感知训练。QAT 前向做 fake quant（量化再反量化），反向用 STE 直通</td><td><a href="#rl/qat">QAT 与反向精度</a></td></tr>
+        <tr><td>high_precision / dequantized</td><td>低精度前向配 BF16 反向时，反向用原始 BF16 值，还是用前向那份量化值反量化回来</td><td><a href="#rl/qat">QAT 与反向精度</a></td></tr>
+      </tbody></table></div>
+  </div>
+</section>
+
+<!-- ============ 附录 · 模型结构 ============ -->
+<section class="pane" data-pane="appendix/models" hidden>
+  <div class="block"><h2>几个模型并排看</h2>
+    <p class="lede">参数量都由下面的结构字段现场算出来，和官方数字对照。三个比例决定了推理和训练卡在哪里：每 token 激活的参数占总参数多少（MoE 稀疏度），全注意力层占多少（KV 随上下文增长的部分），expert 有多“细”（moe_intermediate 越小，每读一个字节能做的 FLOP 越少）。</p>
+    <div class="tbl"><table id="m-compare"></table></div>
+  </div>
+  <div class="block"><h2 id="m-title"></h2>
+    <p class="lede" id="m-note"></p>
+    <div class="stack" id="m-stack" aria-label="层结构"></div>
+    <div class="legend" id="m-stack-legend"></div>
+    <div class="tbl"><table id="m-params"></table></div>
+  </div>
+  <div class="block"><h2>每条序列的缓存随上下文怎么涨</h2>
+    <p class="lede">按 BF16 KV、FP32 线性注意力状态、单卡不切分来算。全注意力层的 KV 随 n 线性增长；线性注意力层的递推状态是常数，和 n 无关。所以混合架构的曲线前面平（状态占大头），过了交点 n* = 状态 ÷ 每 token KV 才开始涨。双对数坐标下，平段是水平线，涨段是斜率 1 的直线。灰色虚线是当前模型的两个分量。</p>
+    <div class="fig"><svg id="m-cache" viewBox="0 0 680 340" role="img" aria-label="每序列缓存随上下文变化"></svg><div class="legend" id="m-cache-legend"></div></div>
+  </div>
+  <div class="block"><h2>同一个结构，在推理和训练里是两回事</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>结构</th><th>推理里是什么</th><th>训练里是什么</th></tr></thead>
+      <tbody>
+        <tr><td>GQA</td><td>decode 读整段 paged KV，算术强度约 2·H<sub>q</sub>/(H<sub>kv</sub>·字节)；TP 超过 H<sub>kv</sub> 后 KV 头只能复制</td><td>varlen / TE fused attention，反向 ≈ 2.5× 前向；CP 要么 KV 绕环（p2p），要么 all-gather，要么 Ulysses 按头 a2a</td></tr>
+        <tr><td>MLA</td><td>decode 用 absorb：q 先乘 W<sub>uk</sub> 到 latent，在 576 维 latent 上做 MQA。latent 没有头维度，TP 切不开，每卡复制，只能靠 DCP 切</td><td>Megatron 不 absorb：kv_b 把 K/V 展开成每头再做 MHA；q/kv 下投影在 SP 下各 rank 只算本地 token</td></tr>
+        <tr><td>DSA</td><td>indexer 每步扫 n/4 个池化 key，主注意力只读 top-2048 个 latent；n ≤ 2048 时 indexer 整个跳过</td><td>indexer 在每个 TP rank 上对整组序列重复算，还多一个 indexer KL loss；CP 只能 all-gather latent K</td></tr>
+        <tr><td>GDN / KDA</td><td>decode 每步读写一遍 H<sub>v</sub>×d<sub>k</sub>×d<sub>v</sub> 状态（FP32），永远 memory-bound；投机验证时状态流量是 (k+2)~(k+4) 倍，各引擎不同</td><td>FLA chunk kernel（C=64），h 不保存、反向重算，反向 ≈ 2.6× 前向；CP 要么按头 a2a，要么传段状态</td></tr>
+        <tr><td>细粒度 MoE</td><td>B 条请求一步碰到 E·(1−(1−k/E)<sup>B</sup>) 个 expert，权重读取随 B 饱和；默认并行方式三家各不相同</td><td>grouped GEMM 的行数 = token × k，强度高；EP a2a 每层 4 次（重算再 2 次），去重后的 dispatcher 按 rank 而不是按 k 发</td></tr>
+        <tr><td>输出头</td><td>每个请求只算最后一个 token 的 logits，再采样</td><td>整段序列都算 logits + CE，词表 15~25 万时是最大的单个算子</td></tr>
+      </tbody></table></div>
+  </div>
+</section>
+
+<!-- ============ 附录 · 口径与参考 ============ -->
+<section class="pane" data-pane="appendix/method" hidden>
+  <div class="block"><h2>为什么要拆成两张算子图</h2>
+    <p>同一个模型，推理和训练发出的 kernel 几乎没有重合。推理一步只有一个前向，而且大部分 decode kernel 的行数是“并发请求数 × 投机宽度”，几十到几百行，权重和 KV / 状态的读取占主导；kernel 的选择（paged attention、absorbed MLA、递推状态更新、在 graph 里的 lm_head、采样）和 CUDA graph 的补齐阶梯决定了时间。训练一个 micro-batch 有几千到几万行，每个算子都要前向、dgrad、wgrad，外加重算、整段 CE、梯度同步和优化器，kernel 是 FLA chunk、TE / cuDNN attention、grouped GEMM，瓶颈多半在算力和通信。把两边塞进同一张算子表，只能得到两边都不对的数。</p>
+  </div>
+  <div class="block"><h2>推理核心的口径</h2>
+    <ul class="tight">
+      <li><b>行数。</b>decode 的行数 = 请求数 × (1+k)。CUDA graph 下按引擎的阶梯补齐：SGLang 和 TokenSpeed 按请求数补齐，vLLM 按 token 数补齐。权重 GEMM、norm、lm_head（在 graph 里时）按补齐后的行算；读 KV、读写状态的 kernel 只按真实请求算（表里标“按真实行”）。</li>
+      <li><b>层边界。</b>每层两次 TP all-reduce。SGLang 对 Qwen / Kimi 在 T ≤ 2048、没开 DP-attention 时融合 AR + 残差 + RMSNorm；vLLM 只对 Qwen 在 torch.compile 下、消息小于阈值时融合；TokenSpeed 除 GLM 外都融合。没融合时 norm 单独一个 kernel。</li>
+      <li><b>GQA。</b>QKV GEMM → QK-norm + RoPE + KV 写入 → paged decode（读 B·n·2·H<sub>kv</sub>·d<sub>h</sub> 字节）→ 输出门 → o_proj。</li>
+      <li><b>MLA / DSA。</b>fused_qkv_a 各卡复制 → norm → q_b → （DSA：indexer 投影 + n/4 个池打分 + top-k）→ W<sub>uk</sub> absorb → latent MQA（DSA 只读 ≤ 2048+3 个 latent）→ W<sub>uv</sub> → o_proj。latent KV 每卡复制，DCP 才能切。prefill 走 MHA，SGLang / TokenSpeed 每个 chunk 重新展开前缀。</li>
+      <li><b>线性注意力。</b>in_proj → 短卷积状态更新 → 递推状态更新（读写 S<sub>l</sub> = H<sub>v</sub>/tp·d<sub>k</sub>·d<sub>v</sub>·字节）→ gated norm → out_proj。状态流量倍数：普通 decode 2·S<sub>l</sub>（TokenSpeed KDA 3·S<sub>l</sub>）；投机验证 SGLang (N+3)·S<sub>l</sub>、vLLM (N+1)·S<sub>l</sub>、TokenSpeed ≈ 3·S<sub>l</sub>。prefill chunk kernel 在 SGLang SM100 和 vLLM GDN 上会把 h 写回 HBM。</li>
+      <li><b>MoE。</b>router 各卡复制 → （Kimi K3：latent 下投影）→ routed expert（碰到的 expert 数 = E·(1−(1−k/E)<sup>T</sup>)，每个碰到的 expert 读一遍权重）→ shared expert（在 graph 下另一个 stream，藏在 routed 后面）→ （K3：latent 宽度 AR + 上投影）。默认并行方式：SGLang 沿 F 按 TP 切；vLLM 开 EP 后是 all-gather + reduce-scatter；TokenSpeed 是 replicated-input EP，每卡对全部 token 做 router，结果 all-reduce。DeepEP 在三家都是选项。</li>
+      <li><b>每步一次。</b>lm_head（SGLang、TokenSpeed 在 graph 里，按补齐行）→ logits all-gather → 采样（TokenSpeed 在 graph 里）。eager 时每个 kernel 一次 CPU launch；graph 时一次 replay。vLLM 开 DP 时每步一次 CPU 侧同步。</li>
+      <li><b>投机解码。</b>验证一步（宽度 k+1）+ draft + 提交（线性注意力要把接受位置的状态写回）。draft 按方法分开算：MTP 按目标模型一层的平均代价，第一步按验证宽度、之后每步 1 行，再加 k 次 lm_head；EAGLE-3 一次 3D → D 投影 + 每步一层 dense + 32K 裁剪词表；DFlash 用目标特征投影出 5 层的上下文 K / V，再对 B·(k+1) 行做一次 5 层 forward + 全词表 lm_head；DSpark 同 DFlash（B·k 行），外加 k 次 [B, 256] × [256, V] 的 Markov 偏置。draft 层按 dense（≈ 12·D² 参数）、8 个 KV 头 × 128 算，外挂 drafter 的权重和上下文 KV 计入显存。TPOT = 一步总时间 ÷ (1 + 平均多接受的 token)。</li>
+      <li><b>显存。</b>权重按部分切：注意力和线性层按 attention TP 切，expert 按 N 切，router / latent 投影 / MLA 的 a 投影复制；KV 池 = mem_fraction × 显存 − 权重 − 预留；线性状态按每请求槽数（SGLang 1 + prefix 1 + 投机 4；TokenSpeed 2；vLLM 1 + k）。</li>
+    </ul>
+  </div>
+  <div class="block"><h2>训练核心的口径</h2>
+    <ul class="tight">
+      <li><b>三遍。</b>每个 GEMM 的 fwd / dgrad / wgrad FLOPs 相同；wgrad 的字节多一份 FP32 main_grad 读写；FP8 时每个 GEMM 输入多一次量化。非 GEMM 的反向全记在 dgrad，按前向的 2 倍或 3 倍算。</li>
+      <li><b>注意力核心。</b>反向 2.5× 前向。GQA 每 token 平均看 S/2 个 key；MLA 训练不 absorb，按 (d<sub>qk</sub>+d<sub>v</sub>)/2 每头算；DSA 训练是 absorbed 稀疏 MLA，indexer 在每个 TP rank 上重复算，再加 KL loss。</li>
+      <li><b>FLA chunk（C=64），每个 value head 每 token。</b>GDN 前向 6KV + 7.25CK + 4CV + 0.5C²，反向 16KV + 18CK + 10CV + 4C²；KDA 前向 6KV + 3.5CK + 4CV + 0.5C²，反向 16KV + 9CK + 10CV + 4C²。h 不保存，反向重算。</li>
+      <li><b>MoE。</b>R = 本 rank token × k × 不均系数。permute / unpermute 是纯搬运；grouped GEMM fc1 / fc2。EP a2a 每层 dispatch + combine 前向各一次、反向各一次，共 4 次；full 重算或重算 moe 模块时再 2 次（torchtitan 默认重算不重放 a2a）。alltoall dispatcher 每个 token 发 k 份，DeepEP / HybridEP / Dist-MoE 按 rank 去重，发 ep·(1−(1−1/ep)<sup>k</sup>) 份。</li>
+      <li><b>TP + SP（Megatron）。</b>每个块前向 AG + RS，反向 3 次 AG + 1 次 RS，MLA 的 AG 按压缩后的宽度。torchtitan 的 TP 按 Column AG + Row RS 前后向各一次算。</li>
+      <li><b>CP。</b>Megatron：p2p 环（KV 绕 cp−1 步，可藏在注意力后面）、all-gather、a2a（Ulysses）；GDN 按头 a2a，KDA 可以按段传 FP32 状态。torchtitan：all-gather KV 或 Ulysses。</li>
+      <li><b>步级。</b>micro-batch 数 = 每 step token ÷ (DP × CP × 每卡 token)。PP 气泡 (p−1)/v 个 micro-batch。Megatron 分布式优化器：梯度 FP32 reduce-scatter + 参数 BF16 all-gather，可与反向 / 前向重叠；torchtitan FSDP2 每个 micro-batch 都要 all-gather 参数（reshard 时反向再一次）+ reduce-scatter 梯度。GPU Adam ≈ 30 B/参数 HBM 流量；CPU Adam 受 PCIe / C2C 和 CPU 吞吐限制。</li>
+      <li><b>显存。</b>Megatron：本地参数 BF16 + FP32 main_grad 6 B/参数，加上分片后的 12 B/参数 optimizer 状态（offload 时为 0）；torchtitan：分片后的 16 B/参数，加当前和预取块的全量参数。激活按每层保存的张量算，full 重算时每层只存输入。</li>
+      <li><b>MFU。</b>这里按真实 FLOPs（含 KDA、MLA、indexer、CE）算；Megatron 自己报的 MFU 漏掉了 KDA 和 MLA 层，torchtitan 的注意力没按 causal 打折，两者都和这里不完全一致。</li>
+    </ul>
+  </div>
+  <div class="block"><h2>训练并行展开的口径</h2>
+    <ul class="tight">
+      <li><b>同一个核心。</b>后训练的并行一节不另建模型：每张图、每个格子都是把“一个 step”的配置换几个参数，再调一次训练核心。框架是 Megatron 时，同样的 TP / CP / EP 度搬到 torchtitan 上（PP 去掉、分布式优化器换成 FSDP2）。推理取舍图同样只调推理核心的 decode 和 prefill。</li>
+      <li><b>CP。</b>L = 本卡一份 K + V 的字节 = 2 B × S/C × 每 token KV 元素（DSA 加 indexer key）。每层 F+B 每卡发出：AllGather 3(C−1)L（full 重算 4(C−1)L），Ring (4C−2)L（重算 (5C−3)L），Ulysses 2 × 2(S/C)(Q + K′)d(C−1)/C（重算 ×1.5），K′ = max(H<sub>kv</sub>, C)，MLA 的 latent 按 C 份复制。滑窗层只交换窗口大小的 halo。露出：Ulysses 全部露出；AllGather / Ring 第一块露出，其余能藏在 (C−1)/C 的注意力核心后面。连续切分时最忙 rank 的注意力核心 × (2 − 1/C)，首尾配对或 Ulysses 为 1。</li>
+      <li><b>EP 字节。</b>按 expert 槽位 n·K(1−1/E)（NCCL all-to-all、Dist-MoE、MoK），按目的 rank 去重 n·(E−1)·p(E)，p(E) = 1 − C(Z−Z/E, K)/C(Z, K)（DeepEP），整份广播 (E−1)·n（AllGather + ReduceScatter）。MXFP8 dispatch 每元素 1 + 1/32 字节。full 重算时 NCCL 后端要重放 dispatch / combine。跨 NVLink 域的部分按 IB 带宽算。</li>
+      <li><b>EP 重叠。</b>NCCL all-to-all 和 AllGather 串行，每层一次 host sync（全重算时两次）；DeepEP 串行，每次交换另加固定开销和一次 CPU 轮询；Dist-MoE 取 max(expert GEMM / 0.92, 线上时间) + barrier；MoK 让比例 f 的 SM 专做通信，取 max(GEMM / (1−f), 线上时间 / min(1, f/0.3))，再加 3% 握手开销。Dist-MoE 只在 SM100+ 的 NVLink 域内，MoK 只在 GB200 / GB300 NVL72 上。</li>
+      <li><b>FSDP。</b>每层每卡线上字节 = P<sub>layer</sub>·(F−1)/F·(a·2 + b<sub>g</sub>)，a = 2（reshard）或 1，b<sub>g</sub> = 4（FP32 梯度）或 2。dense 分片组 = dp_shard × cp / R，expert 分片组 = edp / R。FSDP 在后台流上，按链路（NVLink / IB）分别累加 CP、EP 和 FSDP 的线上时间，超出 micro-batch 计算时间的部分加上第一层的 gather 记为露出。HSDP 每步多一次梯度 all-reduce。all-gather / reduce-scatter 的可达带宽单独一个比例 η<sub>ag</sub>。</li>
+      <li><b>推理取舍。</b>每个配置把每个 DP rank 的并发从 1 扫到 min(显存上限, 引擎上限)，上下文按输入 + 输出/2。聚合部署每步顺带 prefill 完成掉的那些请求（一条 prompt 的 TTFT ÷ DP rank 数）；PD 分离把 prefill 卡按卡秒摊进分母。固定单用户速度时在 Pareto 曲线上线性插值。DeepInfer 的形状（prefill 小 EP、decode 宽 EP、attention 全 DP）按 SGLang 的 kernel 序列算。</li>
+      <li><b>和实测对照。</b>“和实测对照”一节把 8 × H200 上的 Qwen3.5 实测（attention 核心、整模型、expert FSDP、DeepEP 微基准）原样喂给训练核心，列出比值；MoK 只有和 DeepEP 的相对数字。</li>
+    </ul>
+  </div>
+  <div class="block"><h2>量化核心的口径</h2>
+    <ul class="tight">
+      <li><b>硬件。</b>只算 Blackwell：B200 / B300（HGX）与 GB200 / GB300（NVL72）。dense 峰值 BF16 2.25 / FP8 4.5 / FP4 9（B300 13.5）PFLOPS，GB 系列 2.5 / 5 / 10（GB300 15），HBM 8 TB/s，和 LMSYS 引用的 HGX 规格一致。MMA 的峰值取两个操作数里精度高的那个：W4A8 按 FP8，W4A16 按 BF16。</li>
+      <li><b>字节。</b>每元素字节含块 scale：block FP8 权重 1 + 4/128²、激活 1 + 4/128；MXFP8 1 + 1/32；MXFP4 0.5 + 1/32；NVFP4 0.5 + 1/16，激活再加每 token 4 字节 FP32。</li>
+      <li><b>激活量化。</b>融合时没有额外开销（上一个算子直接写低精度）；单独一个 kernel 时多读一遍 BF16、写一遍量化值，至少一个 kernel 的最短时间。</li>
+      <li><b>W4A16。</b>MMA 跑 BF16 峰值；每 BM 行的 CTA 在 CUDA core 上把整块权重反量化一遍，按可调的反量化吞吐记在算力一侧。</li>
+      <li><b>MoE。</b>均匀路由下每个 expert 的行数 X ~ Poisson(T·k/E)；碰到的 expert 各读一遍权重；FLOPs 按补齐到 tile / 对齐后的行数算。auto 近似 FlashInfer TRTLLM MoE 的 tile 选择：next_pow2(λ)，夹在 8 到 64。</li>
+      <li><b>训练三遍。</b>fprop 用前向精度，dgrad / wgrad 用反向精度，wgrad 累加进 FP32 main_grad。量化 kernel：X 一次读、写行（和列）两份；W 是 1D 块时行列两份，2D 块一份，按 micro-batch 数摊；dY 行列两份（NVFP4 预训练在列方向做 16×16 RHT，记 32 FLOP/元素）；per-token scale 没融合时 GEMM 前后各多一次逐元素读写；dequantized 反向多一次反量化。</li>
+      <li><b>放回整个模型。</b>直接调用推理核心和训练核心，只换精度。推理核心里 expert 的 MMA 峰值取激活精度，激活单独量化时每层多一个 kernel；训练核心把精度用到所有 GEMM，NVFP4 + BF16 反向时加上未融合的 per-token 缩放。</li>
+      <li><b>公开数据点。</b>权重 = 时效（半衰期 12 个月）× 硬件匹配 × 来源类型，构建数据点库时算好。Hopper / AMD 的性能数字只作方向参考。</li>
+    </ul>
+  </div>
+  <div class="block"><h2>借鉴的开源实现</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>部分</th><th>参考的实现</th><th>主要看的位置</th></tr></thead>
+      <tbody>
+        <tr><td>SGLang 推理</td><td><a href="https://github.com/sgl-project/sglang" target="_blank" rel="noopener">sgl-project/sglang</a></td><td><code>python/sglang/srt/</code>：模型文件（qwen3_next / qwen3_5 / kimi_k3 / glm 系列 / muse_spark）、<code>layers/attention/</code>（trtllm_mha、trtllm_mla、dsa、hybrid_linear）、<code>layers/moe/</code>、<code>model_executor/runner/</code>（decode / prefill cuda graph runner）、<code>arg_groups/</code> 默认值</td></tr>
+        <tr><td>部署预设</td><td><a href="https://github.com/sgl-project/sgl-cookbook" target="_blank" rel="noopener">sgl-project/sgl-cookbook</a></td><td>推理页 SGLang 预设的并行形状、精度和启动参数（Kimi K3、Muse Spark Open、Qwen3.8-27B 等）</td></tr>
+        <tr><td>vLLM 推理</td><td><a href="https://github.com/vllm-project/vllm" target="_blank" rel="noopener">vllm-project/vllm</a></td><td><code>vllm/model_executor/models/</code>、<code>vllm/v1/attention/backends/</code>、<code>vllm/model_executor/layers/fused_moe/</code>、<code>vllm/config/compilation.py</code>（capture sizes）、<code>vllm/compilation/</code>（AR + RMSNorm 融合 pass）</td></tr>
+        <tr><td>TokenSpeed 推理</td><td><a href="https://github.com/lightseekorg/tokenspeed" target="_blank" rel="noopener">lightseekorg/tokenspeed</a></td><td><code>python/tokenspeed/runtime/</code>：models、ops/attention、ops/moe、ops/communication（TRT-LLM Lamport allreduce）、cuda graph 与调度</td></tr>
+        <tr><td>DeepInfra</td><td>公开博客与价格页</td><td>只公开了技术栈（TRT-LLM + Dynamo、NVFP4 / FP8、MTP / EAGLE、KV-aware routing、PD 分离），没有并行配置和每卡吞吐，所以没有单独建模</td></tr>
+        <tr><td>DeepInfer</td><td><a href="https://github.com/deepseek-ai/DeepInfer" target="_blank" rel="noopener">deepseek-ai/DeepInfer</a></td><td>公开的版本只有离线推理，KV cache 管理、PD 分离和负载均衡不在里面；只服务 DeepSeek-V4.1-Flash。推理页的取舍图只借它的部署说明里的形状（prefill EP2–8、decode EP64–128、attention 全 DP、PD 分离），不套它的 kernel</td></tr>
+        <tr><td>EP 后端</td><td><a href="https://github.com/deepseek-ai/DeepEP" target="_blank" rel="noopener">DeepEP</a>、<a href="https://github.com/meta-pytorch/dist_moe" target="_blank" rel="noopener">meta-pytorch/dist_moe</a>、<a href="https://github.com/cursor/mixture-of-kittens" target="_blank" rel="noopener">cursor/mixture-of-kittens</a>、torchtitan</td><td>DeepEP v2 的 ElasticBuffer（expanded 布局、do_cpu_sync）；dist_moe 的对称 buffer 和 pull 式 W13 gather / W2 epilogue 写回；MoK 的持久 megakernel（通信 SM 和计算 SM 分开）；torchtitan 的 AllToAllTokenDispatcher / DeepEPTokenDispatcher</td></tr>
+        <tr><td>Megatron 训练</td><td><a href="https://github.com/NVIDIA/Megatron-LM" target="_blank" rel="noopener">Megatron-LM</a>、<a href="https://github.com/NVIDIA/TransformerEngine" target="_blank" rel="noopener">TransformerEngine</a></td><td><code>megatron/core/transformer/</code>（moe/token_dispatcher.py、multi_latent_attention.py、experimental_attention_variant/）、<code>megatron/core/ssm/</code>（gated_delta_net）、<code>megatron/core/distributed/</code>、<code>megatron/core/optimizer/</code>、<code>megatron/training/arguments.py</code></td></tr>
+        <tr><td>torchtitan 训练</td><td><a href="https://github.com/pytorch/torchtitan" target="_blank" rel="noopener">pytorch/torchtitan</a></td><td><code>torchtitan/models/</code>（qwen3 / qwen3_5 / kimi_k3 / muse_spark / deepseek_v3）、<code>torchtitan/distributed/</code>（parallelism_context、fsdp、activation_remat、context_parallel、deepep）、<code>torchtitan/rl/</code> 与 <code>torchtitan_recipes/rl/</code></td></tr>
+        <tr><td>线性注意力 kernel</td><td><a href="https://github.com/fla-org/flash-linear-attention" target="_blank" rel="noopener">fla-org/flash-linear-attention</a></td><td><code>fla/ops/gated_delta_rule/chunk.py</code>、<code>fla/ops/kda/chunk.py</code>（前反向的 kernel 拆分）</td></tr>
+        <tr><td>量化</td><td>Miles、slime、TransformerEngine、<a href="https://github.com/pytorch/ao" target="_blank" rel="noopener">torchao</a>、torchtitan、SGLang、vLLM</td><td>Miles <code>tools/convert_hf_to_{mxfp8,nvfp4}.py</code>、<code>miles/utils/{mxfp8,nvfp4}.py</code>、<code>quantizer_{mxfp8,nvfp4}.py</code>；TE <code>common/recipe/__init__.py</code>；torchao <code>prototype/moe_training/</code>、<code>prototype/mx_formats/</code>；torchtitan <code>quantization/mxfp8/</code>；SGLang <code>layers/quantization/</code>（nvfp4_online、modelopt_quant、fp8_utils）、<code>token_dispatcher/deepep.py</code>；vLLM <code>layers/quantization/online/</code></td></tr>
+        <tr><td>TRT-LLM</td><td><a href="https://github.com/NVIDIA/TensorRT-LLM" target="_blank" rel="noopener">NVIDIA/TensorRT-LLM</a></td><td>PyTorch 后端的投机解码（MTP、EAGLE-3、n-gram、draft / target）和 Lamport all-reduce（TokenSpeed 用的就是它）；NVL72 上 a2a 的可达带宽用来定 η<sub>n</sub></td></tr>
+        <tr><td>RL 框架</td><td><a href="https://github.com/THUDM/slime" target="_blank" rel="noopener">THUDM/slime</a>、<a href="https://github.com/radixark/miles" target="_blank" rel="noopener">radixark/miles</a>、<a href="https://github.com/areal-project/AReaL" target="_blank" rel="noopener">areal-project/AReaL</a></td><td>训推一致（TIS / MIS、R3、TITO、确定性对齐）、低精度 rollout 和 QAT 配方、权重同步；slime / Miles 的训练后端是 Megatron-Core（Miles 另有 torchtitan 后端），也是后训练页“配方预设”的来源</td></tr>
+        <tr><td>投机解码</td><td><a href="https://github.com/sgl-project/SpecForge" target="_blank" rel="noopener">sgl-project/SpecForge</a>，EAGLE-3 / DFlash / DSpark 论文</td><td>draft 的结构（EAGLE-3 的三层特征融合、DFlash 的块式 draft、DSpark 的 Markov 头和置信度裁剪）</td></tr>
+      </tbody></table></div>
+  </div>
+  <div class="block"><h2>公开博客与报告</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>来源</th><th>本页用到的部分</th></tr></thead>
+      <tbody>
+        <tr><td><a href="https://www.lmsys.org/blog/" target="_blank" rel="noopener">LMSYS 博客</a></td><td>SGLang / Miles 的模型支持、投机解码、低精度 RL、权重同步；本页“过去一年的发布”里有每篇的要点</td></tr>
+        <tr><td><a href="https://vllm.ai/blog" target="_blank" rel="noopener">vLLM 博客</a></td><td>batch-invariant 推理、训推逐位一致、Model Runner V2</td></tr>
+        <tr><td><a href="https://pytorch.org/blog/" target="_blank" rel="noopener">PyTorch 博客</a></td><td>torchao + torchtitan 的 MXFP8 MoE 训练</td></tr>
+        <tr><td><a href="https://nvidia.github.io/TensorRT-LLM/" target="_blank" rel="noopener">NVIDIA TensorRT-LLM 文档</a></td><td>投机解码、宽 EP、NVL72 上的通信</td></tr>
+        <tr><td><a href="https://humansand.ai/blog/nvfp4-rl" target="_blank" rel="noopener">humans& 博客</a></td><td>The 4-bitter Lesson：NVFP4 RL 的反向精度和 4/6</td></tr>
+        <tr><td><a href="https://inferencex.semianalysis.com/" target="_blank" rel="noopener">SemiAnalysis InferenceX</a></td><td>推理取舍图的画法（单卡吞吐对单用户速度）</td></tr>
+      </tbody></table></div>
+  </div>
+</section>
+</main>
+</div>
+</div>
+<div class="tip" id="tip" hidden></div>
+<script src="src/engine/common.js"></script>
+<script src="src/engine/par.js"></script>
+<script src="src/engine/infer.js"></script>
+<script src="src/engine/train.js"></script>
+<script src="src/engine/quant.js"></script>
+<script src="src/data/db.js"></script>
+<script src="src/data/query.js"></script>
+<script src="src/ui/base.js"></script>
+<script src="src/ui/config.js"></script>
+<script src="src/ui/state.js"></script>
+<script src="src/ui/models.js"></script>
+<script src="src/ui/infer.js"></script>
+<script src="src/ui/train.js"></script>
+<script src="src/ui/quant.js"></script>
+<script src="src/ui/charts.js"></script>
+<script src="src/ui/par.js"></script>
+<script src="src/ui/calib.js"></script>
+<script src="src/ui/tradeoff.js"></script>
+<script src="src/ui/public.js"></script>
+<script src="src/ui/dbview.js"></script>
+<script src="src/ui/releases.js"></script>
+<script src="src/ui/overview.js"></script>
+<script src="src/ui/spec.js"></script>
+<script src="src/ui/rl.js"></script>
+<script src="src/ui/app.js"></script>
+</body>
+</html>

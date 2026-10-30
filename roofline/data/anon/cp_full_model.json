@@ -1,0 +1,78 @@
+{
+ "title": "CP：整模型前向 + 反向",
+ "stage": "train",
+ "hw": "H200",
+ "gpus": 8,
+ "topo": "hgx8",
+ "model": null,
+ "conditions": "真实 BF16 checkpoint，整模型前向 + 反向，full activation checkpointing，不含优化器；一篇文档切到 C 张卡。",
+ "dims": [
+  "model",
+  "method",
+  "cp",
+  "seq"
+ ],
+ "metrics": {
+  "fb_s": {
+   "unit": "s",
+   "label": "前向 + 反向"
+  },
+  "fb_min_s": {
+   "unit": "s",
+   "label": "最快一次"
+  },
+  "fb_max_s": {
+   "unit": "s",
+   "label": "最慢一次"
+  },
+  "peak_gib": {
+   "unit": "GiB",
+   "label": "峰值显存"
+  },
+  "loss_rel_diff": {
+   "unit": "",
+   "label": "loss 相对单卡差"
+  },
+  "gradnorm_rel_diff": {
+   "unit": "",
+   "label": "选定梯度范数相对差"
+  }
+ },
+ "points": [
+{"model":"qwen35","method":"ring","cp":4,"seq":262144,"fb_s":46.3587,"fb_min_s":46.26,"fb_max_s":46.4155,"peak_gib":59.2909,"loss_rel_diff":0.0028584,"gradnorm_rel_diff":0.0174584},
+{"model":"qwen35","method":"ring","cp":8,"seq":262144,"fb_s":25.9056,"fb_min_s":25.8645,"fb_max_s":25.9264,"peak_gib":32.3652,"loss_rel_diff":0.042375,"gradnorm_rel_diff":0.441765},
+{"model":"qwen35","method":"ring","cp":8,"seq":32768,"fb_s":1.42601,"fb_min_s":1.4166,"fb_max_s":1.5191,"peak_gib":21.6184,"loss_rel_diff":0.0446027,"gradnorm_rel_diff":0.43303},
+{"model":"qwen35","method":"ring","cp":8,"seq":4096,"fb_s":1.13084,"fb_min_s":1.12329,"fb_max_s":1.25913,"peak_gib":20.9958,"loss_rel_diff":0.0102428,"gradnorm_rel_diff":0.232073},
+{"model":"qwen35","method":"allgather","cp":4,"seq":262144,"fb_s":48.739,"fb_min_s":48.6429,"fb_max_s":48.7537,"peak_gib":59.2909,"loss_rel_diff":0,"gradnorm_rel_diff":0},
+{"model":"qwen35","method":"allgather","cp":8,"seq":262144,"fb_s":26.5035,"fb_min_s":26.4909,"fb_max_s":26.6074,"peak_gib":32.3711,"loss_rel_diff":0,"gradnorm_rel_diff":0},
+{"model":"qwen35","method":"allgather","cp":8,"seq":32768,"fb_s":1.46279,"fb_min_s":1.44695,"fb_max_s":1.53304,"peak_gib":21.6183,"loss_rel_diff":0,"gradnorm_rel_diff":0},
+{"model":"qwen35","method":"allgather","cp":8,"seq":4096,"fb_s":1.1796,"fb_min_s":1.1555,"fb_max_s":1.2481,"peak_gib":20.9958,"loss_rel_diff":0,"gradnorm_rel_diff":0},
+{"model":"qwen35","method":"ulysses","cp":4,"seq":262144,"fb_s":31.9979,"fb_min_s":31.9746,"fb_max_s":31.9988,"peak_gib":59.2909,"loss_rel_diff":0,"gradnorm_rel_diff":0.00428671},
+{"model":"qwen35","method":"ulysses","cp":8,"seq":262144,"fb_s":16.831,"fb_min_s":16.7997,"fb_max_s":16.835,"peak_gib":32.7397,"loss_rel_diff":0.0148308,"gradnorm_rel_diff":0.359336},
+{"model":"qwen35","method":"ulysses","cp":8,"seq":32768,"fb_s":1.30083,"fb_min_s":1.26004,"fb_max_s":1.32912,"peak_gib":21.6185,"loss_rel_diff":0.0154877,"gradnorm_rel_diff":0.488305},
+{"model":"qwen35","method":"ulysses","cp":8,"seq":4096,"fb_s":1.12535,"fb_min_s":1.07718,"fb_max_s":1.17103,"peak_gib":20.9958,"loss_rel_diff":0.062431,"gradnorm_rel_diff":0.203614},
+{"model":"qwen3moe","method":"ring","cp":4,"seq":40960,"fb_s":5.72833,"fb_min_s":5.72258,"fb_max_s":5.73047,"peak_gib":32.5428,"loss_rel_diff":0.000578227,"gradnorm_rel_diff":0.0124541},
+{"model":"qwen3moe","method":"ring","cp":8,"seq":32768,"fb_s":2.53212,"fb_min_s":2.50186,"fb_max_s":2.53847,"peak_gib":16.4038,"loss_rel_diff":0.0011447,"gradnorm_rel_diff":0.0236844},
+{"model":"qwen3moe","method":"ring","cp":8,"seq":4096,"fb_s":1.25268,"fb_min_s":1.18353,"fb_max_s":1.3058,"peak_gib":16.206,"loss_rel_diff":0.00266173,"gradnorm_rel_diff":0.0657439},
+{"model":"qwen3moe","method":"ring","cp":8,"seq":40960,"fb_s":3.45769,"fb_min_s":3.45402,"fb_max_s":3.4714,"peak_gib":16.766,"loss_rel_diff":0.00340269,"gradnorm_rel_diff":0.040263},
+{"model":"qwen3moe","method":"allgather","cp":4,"seq":40960,"fb_s":5.84826,"fb_min_s":5.84478,"fb_max_s":5.85633,"peak_gib":32.5429,"loss_rel_diff":0,"gradnorm_rel_diff":0},
+{"model":"qwen3moe","method":"allgather","cp":8,"seq":32768,"fb_s":2.50785,"fb_min_s":2.48331,"fb_max_s":2.53723,"peak_gib":16.4036,"loss_rel_diff":0,"gradnorm_rel_diff":0},
+{"model":"qwen3moe","method":"allgather","cp":8,"seq":4096,"fb_s":1.16424,"fb_min_s":1.09357,"fb_max_s":1.23747,"peak_gib":16.206,"loss_rel_diff":0,"gradnorm_rel_diff":0},
+{"model":"qwen3moe","method":"allgather","cp":8,"seq":40960,"fb_s":3.54004,"fb_min_s":3.53563,"fb_max_s":3.54965,"peak_gib":16.766,"loss_rel_diff":0,"gradnorm_rel_diff":0},
+{"model":"qwen3moe","method":"ulysses","cp":4,"seq":40960,"fb_s":4.05715,"fb_min_s":4.05703,"fb_max_s":4.06065,"peak_gib":32.621,"loss_rel_diff":0,"gradnorm_rel_diff":0.000970472},
+{"model":"qwen3moe","method":"ulysses","cp":8,"seq":32768,"fb_s":1.79503,"fb_min_s":1.78776,"fb_max_s":1.82186,"peak_gib":16.4427,"loss_rel_diff":0,"gradnorm_rel_diff":0.00335945},
+{"model":"qwen3moe","method":"ulysses","cp":8,"seq":4096,"fb_s":0.91913,"fb_min_s":0.904,"fb_max_s":1.03863,"peak_gib":16.206,"loss_rel_diff":0,"gradnorm_rel_diff":0.00367177},
+{"model":"qwen3moe","method":"ulysses","cp":8,"seq":40960,"fb_s":2.39477,"fb_min_s":2.39319,"fb_max_s":2.40143,"peak_gib":16.8148,"loss_rel_diff":0,"gradnorm_rel_diff":0.00305623},
+{"model":"qwen3vl","method":"ring","cp":4,"seq":262144,"fb_s":121.649,"fb_min_s":121.644,"fb_max_s":121.674,"peak_gib":44.8206,"loss_rel_diff":0.0143937,"gradnorm_rel_diff":0.0548832},
+{"model":"qwen3vl","method":"ring","cp":8,"seq":262144,"fb_s":67.3475,"fb_min_s":67.3061,"fb_max_s":67.3894,"peak_gib":26.9223,"loss_rel_diff":0.00732886,"gradnorm_rel_diff":0.130321},
+{"model":"qwen3vl","method":"ring","cp":8,"seq":32768,"fb_s":1.80503,"fb_min_s":1.80189,"fb_max_s":1.80604,"peak_gib":14.2185,"loss_rel_diff":0.00295463,"gradnorm_rel_diff":0.162154},
+{"model":"qwen3vl","method":"ring","cp":8,"seq":4096,"fb_s":0.57536,"fb_min_s":0.569916,"fb_max_s":0.588252,"peak_gib":12.771,"loss_rel_diff":0.000856754,"gradnorm_rel_diff":0.231494},
+{"model":"qwen3vl","method":"allgather","cp":4,"seq":262144,"fb_s":124.675,"fb_min_s":124.662,"fb_max_s":124.852,"peak_gib":44.8206,"loss_rel_diff":0,"gradnorm_rel_diff":0},
+{"model":"qwen3vl","method":"allgather","cp":8,"seq":262144,"fb_s":66.5111,"fb_min_s":66.507,"fb_max_s":66.7048,"peak_gib":26.9223,"loss_rel_diff":0,"gradnorm_rel_diff":0},
+{"model":"qwen3vl","method":"allgather","cp":8,"seq":32768,"fb_s":1.85798,"fb_min_s":1.85356,"fb_max_s":1.86406,"peak_gib":14.2185,"loss_rel_diff":0,"gradnorm_rel_diff":0},
+{"model":"qwen3vl","method":"allgather","cp":8,"seq":4096,"fb_s":0.779615,"fb_min_s":0.676701,"fb_max_s":0.86351,"peak_gib":12.771,"loss_rel_diff":0,"gradnorm_rel_diff":0},
+{"model":"qwen3vl","method":"ulysses","cp":4,"seq":262144,"fb_s":75.6733,"fb_min_s":75.6589,"fb_max_s":75.9966,"peak_gib":45.3206,"loss_rel_diff":0,"gradnorm_rel_diff":0.00211381},
+{"model":"qwen3vl","method":"ulysses","cp":8,"seq":262144,"fb_s":38.5119,"fb_min_s":38.4928,"fb_max_s":38.526,"peak_gib":27.1723,"loss_rel_diff":0,"gradnorm_rel_diff":0.00322653},
+{"model":"qwen3vl","method":"ulysses","cp":8,"seq":32768,"fb_s":1.24482,"fb_min_s":1.24242,"fb_max_s":1.24732,"peak_gib":14.2185,"loss_rel_diff":0,"gradnorm_rel_diff":0.00460277},
+{"model":"qwen3vl","method":"ulysses","cp":8,"seq":4096,"fb_s":0.395692,"fb_min_s":0.384738,"fb_max_s":0.453236,"peak_gib":12.771,"loss_rel_diff":0,"gradnorm_rel_diff":0.0094313}
+]}

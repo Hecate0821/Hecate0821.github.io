@@ -1,0 +1,47 @@
+{
+ "title": "单卡 GEMM 与 HBM 拷贝",
+ "stage": "kernel",
+ "hw": "H200",
+ "gpus": 8,
+ "topo": "hgx8",
+ "model": null,
+ "conditions": "单卡 BF16 GEMM（M × N × K）和 HBM 拷贝，不锁频。",
+ "dims": [
+  "op",
+  "m",
+  "n",
+  "k",
+  "bytes",
+  "rw_bytes"
+ ],
+ "metrics": {
+  "ms": {
+   "unit": "ms",
+   "label": "中位数"
+  },
+  "tflops": {
+   "unit": "TFLOP/s",
+   "label": "达到的算力"
+  },
+  "rw_gbs": {
+   "unit": "GB/s",
+   "label": "读 + 写带宽"
+  }
+ },
+ "points": [
+{"op":"bf16_gemm","m":4096,"n":4096,"k":4096,"bytes":null,"rw_bytes":null,"ms":0.177883,"tflops":772.636,"rw_gbs":null},
+{"op":"bf16_gemm","m":8192,"n":8192,"k":8192,"bytes":null,"rw_bytes":null,"ms":1.62267,"tflops":677.595,"rw_gbs":null},
+{"op":"bf16_gemm","m":16384,"n":4096,"k":4096,"bytes":null,"rw_bytes":null,"ms":0.836174,"tflops":657.465,"rw_gbs":null},
+{"op":"bf16_gemm","m":64,"n":512,"k":2048,"bytes":null,"rw_bytes":null,"ms":0.011896,"tflops":11.2826,"rw_gbs":null},
+{"op":"bf16_gemm","m":256,"n":512,"k":2048,"bytes":null,"rw_bytes":null,"ms":0.0117488,"tflops":45.6958,"rw_gbs":null},
+{"op":"bf16_gemm","m":1024,"n":512,"k":2048,"bytes":null,"rw_bytes":null,"ms":0.0117216,"tflops":183.207,"rw_gbs":null},
+{"op":"bf16_gemm","m":4096,"n":512,"k":2048,"bytes":null,"rw_bytes":null,"ms":0.0174272,"tflops":492.904,"rw_gbs":null},
+{"op":"bf16_gemm","m":64,"n":768,"k":2048,"bytes":null,"rw_bytes":null,"ms":0.01104,"tflops":18.2361,"rw_gbs":null},
+{"op":"bf16_gemm","m":256,"n":768,"k":2048,"bytes":null,"rw_bytes":null,"ms":0.0113104,"tflops":71.2005,"rw_gbs":null},
+{"op":"bf16_gemm","m":1024,"n":768,"k":2048,"bytes":null,"rw_bytes":null,"ms":0.0112368,"tflops":286.668,"rw_gbs":null},
+{"op":"bf16_gemm","m":4096,"n":768,"k":2048,"bytes":null,"rw_bytes":null,"ms":0.0221712,"tflops":581.155,"rw_gbs":null},
+{"op":"bf16_gemm","m":4096,"n":12288,"k":4096,"bytes":null,"rw_bytes":null,"ms":0.55445,"tflops":743.651,"rw_gbs":null},
+{"op":"hbm_copy","m":null,"n":null,"k":null,"bytes":134217728,"rw_bytes":268435456,"ms":0.0672896,"tflops":null,"rw_gbs":3989.26},
+{"op":"hbm_copy","m":null,"n":null,"k":null,"bytes":536870912,"rw_bytes":1073741824,"ms":0.258854,"tflops":null,"rw_gbs":4148.05},
+{"op":"hbm_copy","m":null,"n":null,"k":null,"bytes":2147483648,"rw_bytes":4294967296,"ms":1.01384,"tflops":null,"rw_gbs":4236.32}
+]}

@@ -1,0 +1,50 @@
+{
+ "title": "CP：按 KV 头分块流水的对照",
+ "stage": "train",
+ "hw": "H200",
+ "gpus": 8,
+ "topo": "hgx8",
+ "model": null,
+ "conditions": "同 cp_attention，只改 KV 头分块数。",
+ "dims": [
+  "model",
+  "method",
+  "cp",
+  "seq",
+  "head_chunks"
+ ],
+ "metrics": {
+  "fb_ms": {
+   "unit": "ms",
+   "label": "前向 + 反向"
+  },
+  "peak_gib": {
+   "unit": "GiB",
+   "label": "峰值显存"
+  },
+  "speedup": {
+   "unit": "×",
+   "label": "相对单卡"
+  }
+ },
+ "points": [
+{"model":"qwen35","method":"allgather_allkv","cp":8,"seq":131072,"head_chunks":1,"fb_ms":418.364,"peak_gib":3.56703,"speedup":4.26742},
+{"model":"qwen35","method":"allgather_allkv","cp":8,"seq":16384,"head_chunks":1,"fb_ms":7.62039,"peak_gib":0.448023,"speedup":3.60855},
+{"model":"qwen35","method":"allgather_allkv","cp":8,"seq":262144,"head_chunks":1,"fb_ms":1677.53,"peak_gib":7.1316,"speedup":4.28912},
+{"model":"qwen35","method":"allgather_allkv","cp":8,"seq":32768,"head_chunks":1,"fb_ms":26.4645,"peak_gib":0.893595,"speedup":4.09075},
+{"model":"qwen35","method":"allgather_allkv","cp":8,"seq":4096,"head_chunks":1,"fb_ms":1.7913,"peak_gib":0.113844,"speedup":1.27341},
+{"model":"qwen35","method":"allgather_allkv","cp":8,"seq":65536,"head_chunks":1,"fb_ms":104.498,"peak_gib":1.78474,"speedup":4.1934},
+{"model":"qwen35","method":"allgather_allkv","cp":8,"seq":8192,"head_chunks":1,"fb_ms":3.48121,"peak_gib":0.225237,"speedup":2.09359},
+{"model":"qwen3moe","method":"allgather_allkv","cp":8,"seq":16384,"head_chunks":1,"fb_ms":6.48593,"peak_gib":0.448275,"speedup":3.50352},
+{"model":"qwen3moe","method":"allgather_allkv","cp":8,"seq":32768,"head_chunks":1,"fb_ms":22.3676,"peak_gib":0.894091,"speedup":4.05033},
+{"model":"qwen3moe","method":"allgather_allkv","cp":8,"seq":4096,"head_chunks":1,"fb_ms":1.82249,"peak_gib":0.113913,"speedup":1.09443},
+{"model":"qwen3moe","method":"allgather_allkv","cp":8,"seq":40960,"head_chunks":1,"fb_ms":34.1759,"peak_gib":1.117,"speedup":4.07559},
+{"model":"qwen3moe","method":"allgather_allkv","cp":8,"seq":8192,"head_chunks":1,"fb_ms":2.56543,"peak_gib":0.225367,"speedup":2.47132},
+{"model":"qwen3vl","method":"allgather_allkv","cp":8,"seq":131072,"head_chunks":1,"fb_ms":344.918,"peak_gib":4.38198,"speedup":4.17991},
+{"model":"qwen3vl","method":"allgather_allkv","cp":8,"seq":16384,"head_chunks":1,"fb_ms":6.81854,"peak_gib":0.550326,"speedup":3.35091},
+{"model":"qwen3vl","method":"allgather_allkv","cp":8,"seq":262144,"head_chunks":1,"fb_ms":1374.17,"peak_gib":8.761,"speedup":4.24102},
+{"model":"qwen3vl","method":"allgather_allkv","cp":8,"seq":32768,"head_chunks":1,"fb_ms":22.8007,"peak_gib":1.0977,"speedup":3.96704},
+{"model":"qwen3vl","method":"allgather_allkv","cp":8,"seq":4096,"head_chunks":1,"fb_ms":2.07961,"peak_gib":0.139792,"speedup":0.985164},
+{"model":"qwen3vl","method":"allgather_allkv","cp":8,"seq":65536,"head_chunks":1,"fb_ms":87.0753,"peak_gib":2.19246,"speedup":4.11922},
+{"model":"qwen3vl","method":"allgather_allkv","cp":8,"seq":8192,"head_chunks":1,"fb_ms":2.55491,"peak_gib":0.276637,"speedup":2.50255}
+]}

@@ -1,0 +1,7 @@
+{
+  "name": "roofline-tests",
+  "private": true,
+  "description": "Headless checks for the roofline page: every model × framework × preset renders without errors or NaN.",
+  "scripts": { "regression": "node regression.js ../index.html", "timing": "node timing.js ../index.html" },
+  "devDependencies": { "jsdom": "^26.1.0" }
+}
